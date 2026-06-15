@@ -1,0 +1,28 @@
+# Deps para el container cloud (CPU, sin GPU/Whisper/FlagEmbedding).
+# torch CPU se instala ANTES de este archivo en el Dockerfile.
+
+# LLM API
+anthropic>=0.40
+
+# Vector store + embeddings CPU
+qdrant-client>=1.13
+sentence-transformers>=3.3
+
+# UI
+streamlit>=1.40
+pillow>=11.0
+
+# OCR local (modelos bundled en el paquete, sin descarga runtime)
+rapidocr-onnxruntime>=1.3
+
+# HTTP (llamadas Ollama si está disponible)
+httpx>=0.27
+
+# Config
+python-dotenv>=1.0
+pydantic>=2.10
+pydantic-settings>=2.7
+typer>=0.15
+rich>=13.9
+tqdm>=4.67
+numpy>=1.26

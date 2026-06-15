@@ -1,0 +1,40 @@
+# Cambiá 'coach-brain-ilan' si el nombre ya está tomado (fly apps list)
+app            = "coach-brain-ilan"
+primary_region = "gru"   # São Paulo — más cercano a Buenos Aires
+
+[build]
+
+[env]
+  EMBED_DEVICE           = "cpu"
+  COACH_RESPONSE_BACKEND = "anthropic"
+  OLLAMA_ENABLED         = "false"
+  DATA_DIR               = "/data"
+  PROMPTS_DIR            = "/app/prompts"
+  QDRANT_PATH            = ""
+
+# Secrets (NO van acá — usar: flyctl secrets set KEY=value)
+# ANTHROPIC_API_KEY, QDRANT_URL, QDRANT_API_KEY
+
+[[mounts]]
+  source       = "coach_data"
+  destination  = "/data"
+  initial_size = "1gb"
+
+[http_service]
+  internal_port      = 8501
+  force_https        = true
+  auto_stop_machines = "suspend"   # duerme cuando no hay tráfico
+  auto_start_machines = true
+  min_machines_running = 0         # $0 cuando está durmiendo
+
+  [[http_service.checks]]
+    grace_period = "60s"
+    interval     = "30s"
+    method       = "GET"
+    timeout      = "15s"
+    path         = "/_stcore/health"
+
+[[vm]]
+  memory   = "1gb"
+  cpu_kind = "shared"
+  cpus     = 1

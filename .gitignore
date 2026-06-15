@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+build/
+dist/
+
+# uv
+.uv-cache/
+
+# Env / secrets
+.env
+.env.local
+*.key
+
+# Data (no commitear material real)
+data/raw/**
+data/processed/**
+data/curated/**
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/curated/.gitkeep
+
+# Qdrant local storage
+qdrant_storage/
+*.qdrant
+
+# Models cache (HuggingFace, Whisper)
+.cache/
+models/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Test
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage
