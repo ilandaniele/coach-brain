@@ -80,10 +80,13 @@ def label_of(row: dict) -> str:
 
 
 def list_contacts() -> list[dict]:
-    with _conn() as c:
+    c = _conn()
+    try:
         rows = c.execute(
             "SELECT id, name, apellido, tag FROM contacts ORDER BY updated_at DESC"
         ).fetchall()
+    finally:
+        c.close()
     return [{"id": r[0], "name": r[1], "apellido": r[2], "tag": r[3],
              "label": label_of({"name": r[1], "apellido": r[2], "tag": r[3]})} for r in rows]
 
@@ -95,10 +98,13 @@ def find_by_name(name: str) -> list[dict]:
 
 
 def get_contact(cid: int) -> dict | None:
-    with _conn() as c:
+    c = _conn()
+    try:
         r = c.execute(
             "SELECT id, name, apellido, tag, profile, history, updated_at "
             "FROM contacts WHERE id=?", (cid,)).fetchone()
+    finally:
+        c.close()
     if not r:
         return None
     d = {"id": r[0], "name": r[1], "apellido": r[2], "tag": r[3],
@@ -108,21 +114,27 @@ def get_contact(cid: int) -> dict | None:
 
 
 def create_contact(name: str, apellido: str = "", tag: str = "") -> int:
-    with _conn() as c:
+    c = _conn()
+    try:
         cur = c.execute(
             "INSERT INTO contacts(name, apellido, tag, updated_at) VALUES(?,?,?,?)",
             (name.strip(), apellido.strip(), tag.strip(), datetime.now(timezone.utc).isoformat()))
         c.commit()
         return cur.lastrowid
+    finally:
+        c.close()
 
 
 def _save(cid: int, profile: str, history: list) -> None:
-    with _conn() as c:
+    c = _conn()
+    try:
         c.execute(
             "UPDATE contacts SET profile=?, history=?, updated_at=? WHERE id=?",
             (profile, json.dumps(history, ensure_ascii=False),
              datetime.now(timezone.utc).isoformat(), cid))
         c.commit()
+    finally:
+        c.close()
 
 
 def _summarize_profile(user: str, prev: str, chat_text: str, verdict: str) -> str:
@@ -149,20 +161,19 @@ def _summarize_profile(user: str, prev: str, chat_text: str, verdict: str) -> st
         except Exception:  # noqa: BLE001
             pass
 
-    # Fallback: Anthropic Haiku (cloud)
-    if settings.anthropic_api_key:
-        try:
-            from anthropic import Anthropic
-            client = Anthropic(api_key=settings.anthropic_api_key)
-            resp = client.messages.create(
-                model=settings.model_fast,
-                max_tokens=800,
-                temperature=0.2,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            return "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
-        except Exception:  # noqa: BLE001
-            pass
+    # Fallback en cadena: proveedor gratis -> Anthropic. Si no hay ninguno,
+    # devuelve el perfil previo sin romper el análisis.
+    try:
+        from coach_brain.llm import complete_fast
+        out = complete_fast(
+            system="Sos un analista que resume perfiles. Respondés en markdown, sin preámbulo.",
+            user=prompt, max_tokens=800, temperature=0.2).strip()
+        if out.startswith("```"):
+            out = out.split(chr(10), 1)[-1].rsplit("```", 1)[0].strip()
+        if out:
+            return out
+    except Exception:  # noqa: BLE001
+        pass
 
     return prev
 

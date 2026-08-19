@@ -8,7 +8,9 @@ from __future__ import annotations
 import sentence_transformers  # noqa: F401,E402  (orden de carga — ver comentario)
 
 import json
+import threading
 import uuid
+from functools import lru_cache
 from pathlib import Path
 
 import typer
@@ -27,8 +29,26 @@ COL_SITUATIONS = "situations"
 COL_STYLE = "style_phrases"
 
 
+_QDRANT_LOCK = threading.Lock()
+
+
 def get_qdrant() -> QdrantClient:
-    """Cliente Qdrant: usa URL si está configurada, si no modo local embebido."""
+    """Cliente Qdrant: usa URL si está configurada, si no modo local embebido.
+
+    Cacheado + serializado. Dos razones:
+    1) En modo embebido el constructor carga TODOS los vectores (399MB) a numpy
+       de forma eager; sin cache cada query recargaba el índice entero.
+    2) QdrantClient(path=...) toma un file lock sobre el directorio. lru_cache no
+       sostiene el lock mientras ejecuta el cuerpo, así que dos threads de
+       Streamlit podían entrar a la vez y el segundo quedaba colgado esperando
+       el lock del primero. El mutex garantiza una sola construcción.
+    """
+    with _QDRANT_LOCK:
+        return _get_qdrant_cached()
+
+
+@lru_cache(maxsize=1)
+def _get_qdrant_cached() -> QdrantClient:
     if settings.qdrant_url:
         console.print(f"[cyan]Qdrant remoto: {settings.qdrant_url}[/cyan]")
         kwargs: dict = {"url": settings.qdrant_url}

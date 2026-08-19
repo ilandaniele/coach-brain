@@ -37,6 +37,7 @@ _purge_empty_envs(
     "DATA_DIR",
     "PROMPTS_DIR",
     "LOG_LEVEL",
+    "APP_PASSWORD",
 )
 
 
@@ -60,6 +61,20 @@ class Settings(BaseSettings):
     ollama_host: str = Field(default="http://localhost:11434", validation_alias="OLLAMA_HOST")
     ollama_model: str = Field(default="qwen2.5:14b-instruct", validation_alias="COACH_OLLAMA_MODEL")
 
+    # Proveedores OpenAI-compatibles con free tier. Se declaran acá (y no solo
+    # en os.environ) para que también se lean del .env en local; en Fly llegan
+    # como secrets, o sea env vars.
+    gemini_api_key: str = Field(default="", validation_alias="GEMINI_API_KEY")
+    groq_api_key: str = Field(default="", validation_alias="GROQ_API_KEY")
+    cerebras_api_key: str = Field(default="", validation_alias="CEREBRAS_API_KEY")
+    openrouter_api_key: str = Field(default="", validation_alias="OPENROUTER_API_KEY")
+
+    # Overrides de modelo: los proveedores renombran/deprecan seguido.
+    coach_model_gemini: str = Field(default="", validation_alias="COACH_MODEL_GEMINI")
+    coach_model_groq: str = Field(default="", validation_alias="COACH_MODEL_GROQ")
+    coach_model_cerebras: str = Field(default="", validation_alias="COACH_MODEL_CEREBRAS")
+    coach_model_openrouter: str = Field(default="", validation_alias="COACH_MODEL_OPENROUTER")
+
     # Backend de la RESPUESTA del MVP: "ollama" (local gratis) | "anthropic" (Sonnet, pago)
     response_backend: str = Field(default="ollama", validation_alias="COACH_RESPONSE_BACKEND")
 
@@ -70,6 +85,9 @@ class Settings(BaseSettings):
 
     # Ollama: False en cloud (sin GPU local)
     ollama_enabled: bool = Field(default=True, validation_alias="OLLAMA_ENABLED")
+
+    # Password de la app. Vacío = sin login (solo para uso local).
+    app_password: str = Field(default="", validation_alias="APP_PASSWORD")
 
     # Embeddings
     embed_model: str = Field(default="BAAI/bge-m3", validation_alias="EMBED_MODEL")

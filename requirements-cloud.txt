@@ -1,5 +1,4 @@
-# Deps para el container cloud (CPU, sin GPU/Whisper/FlagEmbedding).
-# torch CPU se instala ANTES de este archivo en el Dockerfile.
+# CPU-only PyTorch instalado antes en el Dockerfile
 
 # LLM API
 anthropic>=0.40
@@ -12,10 +11,14 @@ sentence-transformers>=3.3
 streamlit>=1.40
 pillow>=11.0
 
-# OCR local (modelos bundled en el paquete, sin descarga runtime)
-rapidocr-onnxruntime>=1.3
+# OCR local — headless opencv (sin X11/display) para ambiente serverless
+# rapidocr-onnxruntime se instala con --no-deps en el Dockerfile
+opencv-python-headless>=4.5.1.48
+onnxruntime>=1.7.0
+pyclipper>=1.2.0
+Shapely>=1.7.1
 
-# HTTP (llamadas Ollama si está disponible)
+# HTTP (llamadas Ollama si disponible)
 httpx>=0.27
 
 # Config

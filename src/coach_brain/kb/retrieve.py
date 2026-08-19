@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 from rich.console import Console
@@ -50,15 +51,33 @@ class RetrievalResult:
         }
 
 
-def retrieve(query: str, top_principles: int = 10, top_situations: int = 6, top_style: int = 8) -> RetrievalResult:
+# Coseno sobre bge-m3: por debajo de esto el match es ruido y no material del coach.
+# Sin umbral, query_points siempre devuelve top-N aunque nada sea relevante, y el
+# system prompt le dice al modelo que el material recuperado le gana a su criterio.
+MIN_SCORE = 0.45
+
+
+def retrieve(query: str, top_principles: int = 10, top_situations: int = 6, top_style: int = 8,
+             min_score: float = MIN_SCORE) -> RetrievalResult:
     """Busca en las 3 colecciones y devuelve resultados agregados."""
+    # Instrumentado: el retrieval tarda minutos en CPU compartida y hay que saber
+    # si el costo está en el embedding o en la búsqueda (la solución difiere).
+    _t0 = time.perf_counter()
     client = get_qdrant()
+    _t1 = time.perf_counter()
     vec = embed_one(query)
+    _t2 = time.perf_counter()
+    console.print(f"[cyan]retrieve: qdrant_client={_t1-_t0:.2f}s embed={_t2-_t1:.2f}s[/cyan]")
 
     def _search(collection: str, limit: int) -> list[dict]:
         # qdrant-client >=1.12 reemplazó .search() por .query_points().
         try:
-            resp = client.query_points(collection_name=collection, query=vec, limit=limit)
+            _s = time.perf_counter()
+            resp = client.query_points(
+                collection_name=collection, query=vec, limit=limit,
+                score_threshold=min_score,
+            )
+            console.print(f"[cyan]retrieve: search {collection}={time.perf_counter()-_s:.2f}s[/cyan]")
             return [p.payload for p in resp.points]
         except Exception as e:  # noqa: BLE001
             console.print(f"[yellow]retrieve: fallo en {collection}: {type(e).__name__}: {e}[/yellow]")

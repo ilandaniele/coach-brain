@@ -4,7 +4,6 @@ __pycache__/
 *.pyo
 .git/
 data/
-qdrant_storage/
 .env
 .env.local
 .cache/
@@ -21,3 +20,4 @@ htmlcov/
 README.md
 STATUS.md
 scripts/
+uv.lock

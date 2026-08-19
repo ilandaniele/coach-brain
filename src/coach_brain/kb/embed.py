@@ -2,16 +2,28 @@
 
 from __future__ import annotations
 
+import threading
 from functools import lru_cache
 
 from sentence_transformers import SentenceTransformer
 
 from coach_brain.settings import settings
 
+_MODEL_LOCK = threading.Lock()
+
+
+def get_model() -> SentenceTransformer:
+    """Carga lazy del modelo, serializada.
+
+    bge-m3 son ~2.2GB en fp32: sin el mutex, dos threads de Streamlit podían
+    cargarlo en paralelo y duplicar el pico de memoria (OOM en un VM de 4GB).
+    """
+    with _MODEL_LOCK:
+        return _get_model_cached()
+
 
 @lru_cache(maxsize=1)
-def get_model() -> SentenceTransformer:
-    """Carga lazy del modelo. Cached para no recargar entre llamadas."""
+def _get_model_cached() -> SentenceTransformer:
     return SentenceTransformer(settings.embed_model, device=settings.embed_device)
 
 
