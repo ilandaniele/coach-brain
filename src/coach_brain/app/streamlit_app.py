@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import hmac
 import io
 import json
@@ -60,6 +61,12 @@ NEED_TYPES: dict[str, str] = {
 }
 
 
+# Marcadores del encabezado de WhatsApp/Telegram (nombre + estado del contacto).
+_HEADER_STATUS = re.compile(
+    r"en l[íi]nea|online|[úu]lt(?:\.|ima)? ?vez|escribiendo|typing|last seen|activo hace",
+    re.I)
+
+
 # ============ helpers ============
 
 # ── Rate limit del login ───────────────────────────────────────────────────
@@ -102,11 +109,76 @@ def _lock_remaining(ip: str) -> int:
     return max(0, int(fails[-1] + penalty - now))
 
 
+# ── Sesion persistente ─────────────────────────────────────────────────────
+# session_state vive en memoria por conexion websocket: al reconectar (celular
+# que vuelve de segundo plano, cambio de red) se pierde y volvia a pedir el PIN.
+# La cookie va firmada con HMAC usando el PIN como clave: sin conocer el PIN no
+# se puede forjar, y el vencimiento va dentro de la firma para que no se pueda
+# extender editando la cookie.
+_COOKIE = "coach_auth"
+_COOKIE_TTL = 30 * 24 * 3600  # 30 dias
+
+
+def _sign_token(exp: int) -> str:
+    sig = hmac.new(settings.app_password.encode(), str(exp).encode(),
+                   hashlib.sha256).hexdigest()[:32]
+    return f"{exp}.{sig}"
+
+
+def _token_valid(token: str) -> bool:
+    try:
+        exp_str, sig = token.split(".", 1)
+        exp = int(exp_str)
+    except (ValueError, AttributeError):
+        return False
+    if exp < time.time():
+        return False
+    expected = hmac.new(settings.app_password.encode(), exp_str.encode(),
+                        hashlib.sha256).hexdigest()[:32]
+    return hmac.compare_digest(sig, expected)
+
+
+def _cookie_token() -> str:
+    try:
+        raw = (st.context.headers or {}).get("Cookie", "") or ""
+    except Exception:  # noqa: BLE001
+        return ""
+    for part in raw.split(";"):
+        name, _, value = part.strip().partition("=")
+        if name == _COOKIE:
+            return value
+    return ""
+
+
+def _write_cookie(token: str, max_age: int) -> None:
+    """Escribe la cookie desde el iframe del componente al documento padre."""
+    import streamlit.components.v1 as components
+    components.html(
+        f"<script>window.parent.document.cookie = "
+        f"'{_COOKIE}={token}; path=/; max-age={max_age}; SameSite=Lax; Secure';"
+        f"</script>",
+        height=0, width=0)
+
+
+def logout() -> None:
+    _write_cookie("", 0)
+    st.session_state.pop("_authed", None)
+
+
 def require_login() -> None:
     """Gate de PIN con throttling. Sin esto la app queda abierta a internet."""
     if not settings.app_password:
         return  # sin PIN configurado (uso local)
+
     if st.session_state.get("_authed"):
+        pending = st.session_state.pop("_set_cookie", None)
+        if pending:
+            _write_cookie(pending, _COOKIE_TTL)
+        return
+
+    # Cookie valida = sesion previa legitima, no hace falta volver a pedir el PIN.
+    if _token_valid(_cookie_token()):
+        st.session_state["_authed"] = True
         return
 
     st.title("🔒 Coach Asistente")
@@ -123,6 +195,9 @@ def require_login() -> None:
         if hmac.compare_digest(pin.strip(), settings.app_password):
             _login_attempts().pop(ip, None)
             st.session_state["_authed"] = True
+            # Se escribe en el rerun siguiente: el componente no llega a
+            # renderizar si se dispara justo antes de st.rerun().
+            st.session_state["_set_cookie"] = _sign_token(int(time.time()) + _COOKIE_TTL)
             st.rerun()
         else:
             _login_attempts().setdefault(ip, []).append(time.time())
@@ -160,6 +235,26 @@ def _client() -> Anthropic:
         st.error("ANTHROPIC_API_KEY no configurada en .env")
         st.stop()
     return Anthropic(api_key=settings.anthropic_api_key)
+
+
+def friendly_llm_error(backend: str, err: Exception) -> str:
+    """Traduce el error crudo del proveedor a algo accionable.
+
+    El caso mas comun (sin creditos / cuota agotada) llegaba como un volcado de
+    JSON donde no se veia que la solucion es elegir otro modelo en el panel.
+    """
+    low = str(err).lower()
+    if "credit balance" in low or "billing" in low:
+        return (f"**{backend}** no tiene créditos. Elegí un modelo 🆓 en el panel "
+                "lateral, o cargá saldo en console.anthropic.com.")
+    if any(k in low for k in ("429", "quota", "rate limit", "resource_exhausted")):
+        return (f"**{backend}** llegó al límite de su cuota gratuita. Probá otro "
+                "proveedor en el panel lateral, o esperá unos minutos.")
+    if any(k in low for k in ("api key", "unauthorized", "401", "invalid_argument")):
+        return (f"**{backend}** rechazó la API key. Revisá el secret en Fly "
+                "con `flyctl secrets list`.")
+    return f"Error generando la respuesta ({backend}): {err}"
+
 
 
 # Delimitan la seccion de sugerencias dentro de la respuesta del coach.
@@ -260,12 +355,33 @@ def ocr_chat_from_image(img: Image.Image) -> tuple[str, str]:
     res, _ = ocr(np.array(rgb))
     if not res:
         return "", ""
+    height = rgb.size[1]
     items = sorted(res, key=lambda r: r[0][0][1])
     raw_lines = [(t or "").strip() for _b, t, _c in items if (t or "").strip()]
-    turns: list[list] = []
-    for box, txt, _conf in items:
+
+    # El encabezado de WhatsApp (nombre + "en linea") se colaba pegado al primer
+    # mensaje. Se descarta SOLO si de verdad parece encabezado: en la franja
+    # superior, texto corto o con marcador de estado. Asi una captura recortada
+    # que empieza directo con un mensaje no pierde ese mensaje.
+    header_zone = height * 0.12
+    zone_ids, zone_txt = [], []
+    for idx, (box, txt, _c) in enumerate(items):
         txt = (txt or "").strip()
-        if not txt or _is_noise(txt):
+        if not txt:
+            continue
+        if min(pt[1] for pt in box) > header_zone:
+            break  # vienen ordenados por Y: fuera de la franja, listo
+        zone_ids.append(idx)
+        zone_txt.append(txt)
+    # Solo se descarta si hay evidencia POSITIVA de encabezado (un marcador de
+    # estado). Sin esa señal no se toca nada: perder un mensaje real de una
+    # captura recortada es peor que dejar el nombre del contacto colado.
+    skip_ids = set(zone_ids) if _HEADER_STATUS.search(" ".join(zone_txt)) else set()
+
+    turns: list[list] = []
+    for idx, (box, txt, _conf) in enumerate(items):
+        txt = (txt or "").strip()
+        if not txt or _is_noise(txt) or idx in skip_ids:
             continue
         # El borde DERECHO decide, no el izquierdo: un mensaje propio largo envuelve
         # y arranca a la izquierda del medio, quedando mal etiquetado como de ella.
@@ -469,6 +585,12 @@ with st.sidebar:
     vision_choice = st.radio("¿Cómo leo las imágenes?", _vision_opts, index=0)
     vision_local = vision_choice.startswith("🟢")
 
+    if settings.app_password:
+        st.divider()
+        if st.button("🚪 Cerrar sesión", use_container_width=True):
+            logout()
+            st.rerun()
+
 # ── Tabs ───────────────────────────────────────────────────────────────────
 # Etiquetas cortas: con los nombres largos las 3 tabs median 407px y no
 # entraban en los 349 utiles de un celular de 375px.
@@ -626,7 +748,7 @@ with tab1:
                                             retrieved=retrieved_str if use_rag else None,
                                             mode_directive=f"{MODES[mode_choice]} {_HUMOR_NUDGE}")
                     except Exception as e:
-                        st.error(f"Error generando la respuesta ({resp_backend}): {e}")
+                        st.error(friendly_llm_error(resp_backend, e))
 
                 if answer:
                     st.session_state["last_chat_answer"] = answer
@@ -745,7 +867,7 @@ with tab2:
                         personal_notes=personal_notes,
                     )
                 except Exception as e:
-                    st.error(f"Error: {e}")
+                    st.error(friendly_llm_error(resp_backend, e))
 
             if lines_answer:
                 st.session_state["last_lines_answer"] = lines_answer
