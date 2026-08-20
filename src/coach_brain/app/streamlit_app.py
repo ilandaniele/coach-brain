@@ -162,9 +162,27 @@ def _client() -> Anthropic:
     return Anthropic(api_key=settings.anthropic_api_key)
 
 
+# Delimitan la seccion de sugerencias dentro de la respuesta del coach.
+_SUGG_START = re.compile(r"l[íi]neas posibles|opciones", re.I)
+_SUGG_END = re.compile(
+    r"cu[áa]ndo usar|qu[ée] evitar|c[óo]mo entregarlo|nivel de riesgo|veredicto|riesgo\s*:", re.I)
+
+
 def extract_quoted_lines(answer: str) -> list[str]:
-    """Saca las frases entre comillas del output para mostrarlas con botón de copiar."""
-    found = re.findall(r'["“]([^"”\n]{12,300})["”]', answer)
+    """Saca SOLO las frases sugeridas, para mostrarlas con botón de copiar.
+
+    Escanear la respuesta entera traía comillas de dos lugares equivocados: los
+    mensajes de ella que el diagnóstico cita como evidencia, y los ejemplos de
+    "qué evitar". En el celular este bloque es la interfaz principal, así que
+    ofrecer para copiar una línea que hay que evitar es peor que no ofrecer nada.
+    """
+    scope = answer
+    m = _SUGG_START.search(answer)
+    if m:
+        rest = answer[m.end():]
+        end = _SUGG_END.search(rest)
+        scope = rest[:end.start()] if end else rest
+    found = re.findall(r'["“]([^"”\n]{12,300})["”]', scope)
     seen, out = set(), []
     for line in found:
         s = line.strip()
@@ -452,7 +470,9 @@ with st.sidebar:
     vision_local = vision_choice.startswith("🟢")
 
 # ── Tabs ───────────────────────────────────────────────────────────────────
-tab1, tab2, tab3 = st.tabs(["💬 Analizar Chat", "🎯 Líneas & Situaciones", "📝 Mis Frases"])
+# Etiquetas cortas: con los nombres largos las 3 tabs median 407px y no
+# entraban en los 349 utiles de un celular de 375px.
+tab1, tab2, tab3 = st.tabs(["💬 Chat", "🎯 Líneas", "📝 Frases"])
 
 
 # ══════════════════════════════════════════════════════════════════════════

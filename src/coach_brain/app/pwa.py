@@ -123,10 +123,15 @@ input, textarea, select { font-size: 16px !important; }
 
   /* Tap targets comodos con el pulgar. */
   .stButton button { min-height: 46px; font-size: 1rem; }
-  [data-baseweb="tab"] { padding: 0.5rem 0.7rem !important; font-size: 0.9rem !important; }
 
-  /* Los tabs no entran en pantallas angostas: scroll horizontal en vez de romper. */
-  [data-baseweb="tab-list"] { overflow-x: auto; flex-wrap: nowrap; }
+  /* Streamlit 1.58 dejo de usar data-baseweb="tab" (ahora es data-testid="stTab"),
+     asi que la regla vieja no matcheaba nada y las 3 tabs no entraban en 375px.
+     Se apunta a los tres selectores; role="tab" es el mas estable de todos. */
+  [data-baseweb="tab"], [data-testid="stTab"], [role="tab"] {
+    padding: 0.4rem 0.3rem !important;
+    font-size: 0.85rem !important;
+  }
+  [data-baseweb="tab-list"], [role="tablist"] { overflow-x: auto; flex-wrap: nowrap; }
 
   h1 { font-size: 1.5rem !important; }
 }
