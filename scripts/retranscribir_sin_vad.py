@@ -44,6 +44,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -75,6 +76,173 @@ MIN_CHARS_POR_MINUTO = _V.MIN_CHARS_POR_MINUTO
 DUR_MINIMA_PARA_JUZGAR = _V.DUR_MINIMA_PARA_JUZGAR
 SILENCIO_DB = _V.SILENCIO_DB
 volumen_medio = _V.volumen_medio
+
+
+# Frases que Whisper inventa cuando no hay habla que transcribir. Vienen de los
+# subtitulos de YouTube con los que se entreno, y aparecen enteras como si
+# fueran el contenido del audio. Medidas en este corpus: "Gracias.",
+# "Gracias por ver el video." y "La ciudad de Bogota" repetida nueve veces.
+ALUCINACIONES = (
+    "gracias",
+    "gracias por ver el video",
+    "gracias por ver el vídeo",
+    "gracias por su atencion",
+    "gracias por su atención",
+    "muchas gracias",
+    "gracias por mirar",
+    "suscribete",
+    "suscríbete",
+    "suscribete al canal",
+    "suscríbete al canal",
+    "suscribanse",
+    "suscríbanse",
+    "subtitulos realizados por la comunidad de amara.org",
+    "subtítulos realizados por la comunidad de amara.org",
+    "amara.org",
+    "musica",
+    "música",
+    "subtitulado por",
+    "hasta la proxima",
+    "hasta la próxima",
+    "nos vemos en el proximo video",
+    "nos vemos en el próximo video",
+    "no te olvides de suscribirte",
+    "y hasta luego",
+    "fin",
+    "continuara",
+    "continuará",
+    "mas informacion",
+    "más información",
+)
+
+# Whisper tambien inventa dominios, que en una nota de voz no existen.
+_URL = re.compile(r"www\.\S+|https?://", re.I)
+
+# Un texto que colapsa a una sola frase corta repetida es un bucle del decoder,
+# no habla. Con menos repeticiones que esto puede ser enfasis real.
+REPETICIONES_PARA_BUCLE = 3
+
+# Cuando una secuencia corta de palabras cubre esta fraccion del texto, el
+# decoder esta en bucle. Medido: el caso bueno de 6445 caracteres tiene su
+# n-grama mas repetido cubriendo 2.7%, y los bucles reales cubren mas del 90%.
+COBERTURA_PARA_BUCLE = 0.6
+MAX_PALABRAS_DEL_NGRAMA = 8
+
+# Si al sacar las frases inventadas queda menos que esto, no habia nada mas.
+# El caso bueno conserva el 96% del texto; los descartados, cero.
+RESTO_MINIMO = 0.25
+
+
+def _normalizar(t: str) -> str:
+    """Minusculas, sin puntuacion de borde ni espacios repetidos."""
+    t = " ".join(t.lower().split())
+    return t.strip(" .,;:!?¡¿-–—\"'()[]")
+
+
+def _frases(t: str) -> list[str]:
+    """El texto partido en frases normalizadas, sin vacias."""
+    return [f for f in (_normalizar(x) for x in re.split(r"[.!?\n]+", t)) if f]
+
+
+def _ngrama_dominante(t: str):
+    """La secuencia corta de palabras más repetida y qué fracción del texto cubre.
+
+    Hace falta porque Whisper en bucle muchas veces no pone puntuación: "La
+    ciudad de Bogota" nueve veces seguidas es UNA sola frase para cualquier
+    criterio que parta por puntos, y así se escapó de la primera versión.
+
+    Devuelve (secuencia, veces, cobertura). La cobertura es qué parte de las
+    palabras del texto ocupa esa secuencia repetida: un bucle real cubre casi
+    todo, mientras que una muletilla dentro de una conversación cubre poco.
+
+    La cobertura cuenta **posiciones distintas**, no apariciones. Multiplicar
+    apariciones por largo sobrecuenta cuando se solapan: diez "o sea" seguidos
+    ocupan 20 palabras, pero el 4-grama "o sea o sea" aparece en 7 posiciones
+    solapadas y multiplicando daria 28 palabras de 40, un 70% que no existe.
+    """
+    palabras = _normalizar(t).split()
+    if not palabras:
+        return ("", 0, 0.0)
+    mejor = ("", 0, 0.0)
+    for n in range(2, MAX_PALABRAS_DEL_NGRAMA + 1):
+        if len(palabras) < n * REPETICIONES_PARA_BUCLE:
+            break
+        posiciones: dict[str, list[int]] = {}
+        for k in range(len(palabras) - n + 1):
+            posiciones.setdefault(" ".join(palabras[k:k + n]), []).append(k)
+        g, ks = max(posiciones.items(), key=lambda kv: len(kv[1]))
+        cubiertas = {i for k in ks for i in range(k, k + n)}
+        cobertura = len(cubiertas) / len(palabras)
+        if cobertura > mejor[2]:
+            mejor = (g, len(ks), cobertura)
+    return mejor
+
+
+def _resto_sin_frases_inventadas(t: str) -> float:
+    """Qué fracción del texto queda al sacar las frases que Whisper inventa.
+
+    Separa el caso bueno del malo mejor que contar frases. El transcript de
+    6445 caracteres que recuperó diálogo real incluye "Muchas gracias" quince
+    veces, y conserva el 96%. Los que son solo "Gracias por ver el video."
+    repetido conservan cero, por mucho que las repeticiones no lleguen al piso
+    de tres.
+    """
+    total = len(_normalizar(t))
+    if not total:
+        return 0.0
+    queda = 0
+    for f in _frases(t):
+        if f in ALUCINACIONES or _URL.search(f):
+            continue
+        queda += len(f)
+    return queda / total
+
+
+def parece_alucinacion(texto: str) -> str | None:
+    """Por qué este texto parece inventado, o None si parece habla real.
+
+    No decide nada por su cuenta: solo marca, para que revisar los resultados
+    sea leer con atención los que pueden ser habla real en vez de todos. Un
+    falso positivo se ve al leerlo; lo que no se puede permitir es que una
+    alucinación entre al corpus sin que nadie la haya mirado.
+
+    Tres señales, las tres medidas en este corpus:
+
+    - El texto entero es una frase que Whisper arrastra de los subtítulos de
+      YouTube con los que se entrenó ("Gracias por ver el video.").
+    - Sacando esas frases no queda casi nada, así que no había nada más.
+    - Una secuencia corta de palabras cubre casi todo el texto: el decoder en
+      bucle ("La ciudad de Bogota" nueve veces, sin un solo punto).
+    """
+    t = texto.strip()
+    if not t:
+        return "vacio"
+    n = _normalizar(t)
+    if n in ALUCINACIONES:
+        return "es solo %r, frase que Whisper inventa sobre ruido" % t.strip()
+
+    resto = _resto_sin_frases_inventadas(t)
+    if resto < RESTO_MINIMO:
+        return ("sacando las frases que Whisper inventa queda el %.0f%% del texto"
+                % (resto * 100))
+
+    frases = _frases(t)
+    if frases:
+        distintas = set(frases)
+        if len(frases) >= REPETICIONES_PARA_BUCLE and len(distintas) == 1:
+            return ("una sola frase repetida %d veces, decoder en bucle: %r"
+                    % (len(frases), frases[0]))
+        mas_comun = max(distintas, key=frases.count)
+        veces = frases.count(mas_comun)
+        if veces >= REPETICIONES_PARA_BUCLE and veces / len(frases) >= 0.8:
+            return ("%d de %d frases son %r, decoder en bucle"
+                    % (veces, len(frases), mas_comun))
+
+    g, veces, cobertura = _ngrama_dominante(t)
+    if veces >= REPETICIONES_PARA_BUCLE and cobertura >= COBERTURA_PARA_BUCLE:
+        return ("%r repetido %d veces cubre el %.0f%% del texto, decoder en bucle"
+                % (g, veces, cobertura * 100))
+    return None
 
 
 def clasificar(chars: int, dur: float, db: float | None) -> str | None:
@@ -160,14 +328,78 @@ def candidatos(medir_audio: bool = True) -> list[dict]:
     return out
 
 
+def _veredicto(nuevo: str, chars_con_vad: int) -> str:
+    """Qué conviene hacer con un resultado sin VAD. Marca, no decide.
+
+    Promover un transcript cambia lo que el índice devuelve, y descartarlo tira
+    trabajo de GPU. Las dos cosas las decide una persona que haya leído el
+    texto; esto solo ordena los 22 resultados para que haya que leer con
+    atención los que pueden ser habla real.
+    """
+    nuevo = (nuevo or "").strip()
+    sospecha = parece_alucinacion(nuevo)
+    if sospecha:
+        return "DESCARTAR: " + sospecha
+    if len(nuevo) <= chars_con_vad:
+        return ("DESCARTAR: no recupero nada (%d chars contra %d con VAD)"
+                % (len(nuevo), chars_con_vad))
+    return "REVISAR: %+d chars contra la version con VAD" % (len(nuevo) - chars_con_vad)
+
+
+def juzgar() -> int:
+    """Informa qué hay en `_novad/` y qué conviene hacer con cada resultado.
+
+    No promueve nada ni borra nada.
+    """
+    if not SALIDA.exists():
+        print("no hay nada en %s" % SALIDA, flush=True)
+        return 0
+    res = sorted(SALIDA.glob("*.json"))
+    print("resultados sin VAD: %d" % len(res), flush=True)
+    descartar, revisar = [], []
+    for rp in res:
+        try:
+            nd = json.loads(rp.read_text(encoding="utf-8"))
+        except Exception as e:  # noqa: BLE001
+            print("ILEGIBLE %s: %s" % (rp.name, e), flush=True)
+            continue
+        nuevo = (nd.get("full_text") or "").strip()
+        orig_p = TRANSCRIPTS / rp.name
+        viejo = ""
+        if orig_p.exists():
+            try:
+                viejo = (json.loads(orig_p.read_text(encoding="utf-8"))
+                         .get("full_text") or "").strip()
+            except Exception:  # noqa: BLE001
+                pass
+        v = _veredicto(nuevo, len(viejo))
+        fila = (rp.stem, len(viejo), len(nuevo), v, nuevo)
+        (descartar if v.startswith("DESCARTAR") else revisar).append(fila)
+
+    for titulo, grupo in (("A REVISAR", revisar), ("A DESCARTAR", descartar)):
+        print("\n%s: %d" % (titulo, len(grupo)), flush=True)
+        for stem, lv, ln, v, texto in grupo:
+            print("\n  %s" % stem, flush=True)
+            print("    %s" % v, flush=True)
+            print("    con VAD %d chars | sin VAD %d chars" % (lv, ln), flush=True)
+            print("    %s" % " ".join(texto[:600].split()), flush=True)
+    print("\nNada se promueve ni se borra automaticamente: "
+          "lo decide una persona que leyo el texto.", flush=True)
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Re-transcribe sin VAD lo que el verificador marca por densidad baja.")
     ap.add_argument("--listar", action="store_true",
                     help="Solo muestra los candidatos y sale, sin cargar el modelo")
+    ap.add_argument("--juzgar", action="store_true",
+                    help="Informa que hay en _novad/ y que hacer con cada resultado")
     ap.add_argument("--limite", type=int, default=0,
                     help="Procesa como maximo N candidatos (0 = todos)")
     args = ap.parse_args()
+    if args.juzgar:
+        return juzgar()
 
     print("umbrales desde verificar.py: piso %.1f chars/minuto, silencio %.1f dB"
           % (MIN_CHARS_POR_MINUTO, SILENCIO_DB), flush=True)
@@ -206,8 +438,7 @@ def main() -> int:
 
     for c in pendientes:
         src = c["fuente"]
-        print("\n=== %s  (%.0fs, %.1f c/min)" % (c["stem"], c["dur"], c["densidad"]),
-              flush=True)
+        print("\n=== %s  (%.0fs, %s)" % (c["stem"], c["dur"], c["motivo"]), flush=True)
         print("    con VAD:  %d chars | %s" % (c["chars"], c["arranque"]), flush=True)
         try:
             if src.suffix.lower() in VIDEO_EXT:
@@ -226,6 +457,7 @@ def main() -> int:
         destino.write_text(json.dumps(nd, ensure_ascii=False, indent=2), encoding="utf-8")
         print("    sin VAD:  %d chars, %d segmentos -> %s"
               % (len(nd["full_text"]), len(nd["segments"]), destino), flush=True)
+        print("    %s" % _veredicto(nd["full_text"], c["chars"]), flush=True)
         print("    %s" % nd["full_text"][:1500], flush=True)
 
     print("\nlisto. LEER data/processed/_novad/ antes de promover nada al corpus:",
