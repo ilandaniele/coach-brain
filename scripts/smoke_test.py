@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import os
 import shutil
 import sys
@@ -12,6 +13,18 @@ from rich.table import Table
 console = Console()
 
 QUICK = "--quick" in sys.argv or os.environ.get("SMOKE_QUICK") == "1"
+
+# Los seis paquetes que el pipeline necesita para arrancar. El chequeo importa
+# uno por uno y nombra los que fallan: antes importaba solo streamlit y el
+# informe listaba los seis igual, asi que faltar faster-whisper daba OK verde.
+PAQUETES = (
+    "anthropic",
+    "faster_whisper",
+    "pypdf",
+    "qdrant_client",
+    "sentence_transformers",
+    "streamlit",
+)
 
 
 def check(label: str, fn) -> tuple[bool, str]:
@@ -27,8 +40,15 @@ def main() -> int:
 
     # 1. Imports
     def _imports():
-        import streamlit  # noqa: F401
-        return "anthropic, faster_whisper, pypdf, qdrant_client, sentence_transformers, streamlit"
+        faltan = []
+        for nombre in PAQUETES:
+            try:
+                importlib.import_module(nombre)
+            except Exception as e:  # noqa: BLE001
+                faltan.append(f"{nombre} ({type(e).__name__}: {e})")
+        if faltan:
+            raise RuntimeError("no se pudieron importar: " + "; ".join(faltan))
+        return ", ".join(PAQUETES)
 
     results.append(("imports", *check("imports", _imports)))
 

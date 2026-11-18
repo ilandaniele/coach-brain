@@ -48,6 +48,8 @@ jobs:
           PYTHONIOENCODING: utf-8
         run: .venv/bin/python -m pytest -q
 
-      # scripts/ no tiene tests propios: al menos que no entre nada que no compile.
+      # Los tres scripts con logica propia (verificar, smoke_test y
+      # upload_to_qdrant_cloud) ya tienen tests; los demas son de un solo uso.
+      # Este paso es la red para esos: al menos que no entre nada que no compile.
       - name: Compilar scripts/
         run: .venv/bin/python -m compileall -q scripts

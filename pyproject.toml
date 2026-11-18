@@ -71,3 +71,9 @@ ignore = ["E501"]
 # (`%-44s`, `%6d`, `%8.1f`). Reescribirlos a f-strings a ciegas desalinea las
 # columnas sin que falle nada, asi que UP031 no aplica ahi.
 "scripts/*" = ["UP031"]
+# upload_to_qdrant_cloud.py mete src/ en sys.path antes de importar coach_brain,
+# para poder correrse con un Python que no tenga el paquete instalado. Eso obliga
+# a que sus imports queden despues de una sentencia, que es justo lo que E402
+# marca. Es deliberado, no un descuido: moverlos arriba rompe el script fuera del
+# venv del proyecto.
+"scripts/upload_to_qdrant_cloud.py" = ["E402"]

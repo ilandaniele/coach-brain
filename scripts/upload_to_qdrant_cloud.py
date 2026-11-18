@@ -16,7 +16,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "src"))
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams
@@ -30,14 +31,30 @@ COLLECTIONS = ["principles", "situations", "style_phrases"]
 BATCH = 200
 
 
+def storage_local() -> Path:
+    """La carpeta del Qdrant embebido, leida de QDRANT_PATH.
+
+    No se usa `settings.qdrant_storage` a proposito: esa propiedad devuelve
+    `Path("")` —o sea `.`— en cuanto QDRANT_URL esta configurada, porque la app
+    la usa para decidir entre modo embebido y modo cloud. Este script necesita
+    las dos cosas a la vez, y `Path("")` existe siempre (es el directorio
+    actual), asi que el chequeo de abajo pasaba, se abria la raiz del repo como
+    base Qdrant, no habia ninguna coleccion, se salteaban las tres y la
+    migracion avisaba "completa" sin haber subido un solo vector.
+    """
+    p = Path(settings.qdrant_path)
+    return p if p.is_absolute() else REPO / p
+
+
 def main() -> None:
     if not settings.qdrant_url:
         console.print("[red]QDRANT_URL no configurada. Ponela en .env y volvé a correr.[/red]")
         sys.exit(1)
 
-    local_path = settings.qdrant_storage
-    if not local_path.exists():
-        console.print(f"[red]Storage local no existe: {local_path}[/red]")
+    local_path = storage_local()
+    if not (local_path / "collection").exists():
+        console.print(f"[red]No hay un Qdrant embebido en: {local_path}[/red]")
+        console.print("[red]Revisa QDRANT_PATH; sin eso no hay nada que migrar.[/red]")
         sys.exit(1)
 
     console.print(f"[cyan]Local :[/cyan] {local_path}")
