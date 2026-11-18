@@ -303,13 +303,68 @@ posiciones solapadas y multiplicando daría 28 de 40, un 70 % que no existe.
 El veredicto solo dice `DESCARTAR` o `REVISAR`; **no existe "promover"**, y hay
 un test que lo fija (`test_veredicto_nunca_promueve_solo`). La calibración
 carga del lado de no marcar habla real: el caso bueno de 6.445 caracteres
-contiene `"Muchas gracias"` quince veces y tiene que seguir pasando. 43 tests
-entre las dos partes.
+contiene `"Muchas gracias"` quince veces y tiene que seguir pasando. Entre
+`test_retranscribir_sin_vad.py` (12), `test_novad_alucinaciones.py` (20) y
+`test_novad_avisos.py` (12), 44 tests.
+
+**Los avisos, que no son veredictos.** Los resultados no se parten en limpios y
+basura: hay transcripts que son mitad habla real y mitad bucle del decoder. En
+`wa_audio_00029933`, `"¡Vaya que se cae!"` repetido 9 veces cubre el 49 % del
+texto, por debajo del 60 % que hace falta para descartar — y el veredicto
+`REVISAR` es el correcto, pero no decía dónde mirar. Bajar el umbral para
+atrapar ese caso sería calibrar sobre un archivo; `avisos()` en cambio **anota
+sin cambiar el veredicto**, con umbrales más bajos (`AVISO_COBERTURA = 0.25`,
+`AVISO_INVENTADO = 0.1`):
+
+```
+wa_audio_00029933-Parque Villa Biarritz
+    REVISAR: +264 chars contra la version con VAD
+    ojo: '¡vaya que se cae!' repetido 9 veces cubre el 49% del texto
+    ojo: el 20% del texto son frases que Whisper inventa
+```
+
+La propiedad que los hace seguros de agregar está en un test
+(`test_los_avisos_no_cambian_el_veredicto`): **un aviso de más cuesta una línea
+en el reporte, un veredicto de más descarta trabajo de GPU sin que nadie lo
+haya leído.** Separan bien sobre los datos reales: de los 6 resultados a
+revisar, los 3 que parecen habla de verdad no juntan ninguno.
+
+**El detector corrido sobre el corpus vivo.** Que el detector exista para la
+auditoría sin VAD no significa que el corpus con VAD esté limpio: el transcript
+**con VAD** de `wa_audio_00021896` son 1.907 caracteres de `"¡Gracias por ver
+el video!"` repetido 25 veces, así que esa alucinación ya está indexada. Corrido
+sobre los 8.838 transcripts vivos (solo lectura, sin tocar nada):
+
+| | |
+|---|---|
+| Marcados como alucinación | **4**, 36 caracteres en total |
+| Con aviso pero no marcados | **36** |
+
+Los 4 marcados son transcripts de 8 a 12 caracteres (`"Gracias."` tres veces,
+`"¡Suscríbete!"` una): ruido que el VAD dejó pasar, intrascendente para lo que
+devuelve el índice.
+
+De los 36 avisados, **uno solo junta las dos señales**: `wa_audio_00021896`,
+33 % de cobertura y 33 % de frases inventadas. Los otros 35 son notas de voz
+cortas donde una muletilla repetida tres o cuatro veces cubre más del 25 % del
+texto justamente porque el texto es corto — `"qué bonito"` seis veces en 256
+caracteres es alguien hablando, no el decoder en bucle. Eso acota para qué
+sirve el aviso de cobertura: **en un texto corto cualquier repetición cubre
+mucho**, así que ahí solo vale leído junto al otro.
+
+**Sacar o re-transcribir cualquier transcript vivo cambia lo que devuelve el
+índice, así que lo decide Ilan**, igual que la promoción de un resultado sin
+VAD. El escaneo vive en `scripts/escanear_corpus.py`, importa el criterio de la
+auditoría en vez de copiarlo, y **no escribe nada**: no está en `finalize.ps1`
+y se puede correr cuando sea. 6 tests, cuatro de ellos sobre el recorrido y no
+sobre la detección (que no escriba, que un transcript vacío no cuente como
+alucinación, que un JSON roto no corte la corrida).
 
 ```powershell
 .venv\Scripts\python.exe -I -X utf8 scripts/retranscribir_sin_vad.py --listar
 .venv\Scripts\python.exe -I -X utf8 scripts/retranscribir_sin_vad.py          # transcribe
 .venv\Scripts\python.exe -I -X utf8 scripts/retranscribir_sin_vad.py --juzgar # informa qué hay
+.venv\Scripts\python.exe -I -X utf8 scripts/escanear_corpus.py                # el corpus vivo
 ```
 
 ### Pendiente cuando termine la extracción
@@ -689,6 +744,55 @@ duración igual**. Los dos pedazos hacen falta:
   determinista. Dos PDF idénticos, en cambio, dan el largo exacto y no tienen
   duración.
 
+### 27. `os.walk` sobre una ruta que no se puede recorrer devuelve cero archivos
+
+No levanta excepción: no encuentra nada. `scripts/manifest.py` recorre el
+material así, y desde que es el paso 7 de `finalize.ps1` corre **solo**,
+sobrescribiendo `INVENTARIO.md`. Con las junctions de `data/raw` apuntando a
+una carpeta movida o a un disco desconectado, ese paso escribiría un
+inventario que dice que en disco no hay material — exactamente lo que alguien
+querría leer antes de borrar 360 GB.
+
+El caso parcial es el más fácil de no notar: si sobrevive la junction de
+`videos` y se cae la de `whatsapp`, el recorrido trae unos cientos de archivos
+en vez de 17.801. No es cero, así que un chequeo de "vino algo" no lo atrapa.
+
+`exigir_piso()` corta antes de escribir nada, y el piso sale de un invariante,
+no de una calibración: **cada transcript lo produjo un archivo fuente, así que
+en disco no puede haber menos archivos que transcripts.** Hoy son 17.801 contra
+8.838, así que el margen es amplio y solo salta cuando algo se rompió de
+verdad. `--sin-piso` lo desactiva, para el caso en que el material se haya
+borrado a propósito y se quiera un inventario que lo refleje. 7 tests.
+
+### 28. Una métrica puede medir dos cosas y parecer que mide una
+
+El detector de alucinaciones tenía los dos defectos de esta clase, los dos
+encontrados leyendo resultados reales y no el código.
+
+**La frase inventada pegada a otra frase.** `_resto_sin_frases_inventadas`
+sacaba una frase solo cuando la frase **entera** era una alucinación conocida.
+Whisper muchas veces las escupe sin puntuación, así que se fusionan con lo que
+tienen al lado y dejan de ser una frase entera: `"paloma dahi paloma de tennis
+gracias por ver el video"` contaba sus 53 caracteres como habla real. Ahora se
+sacan como subcadena, con límites de palabra — sin `\b`, `"fin"` (que está en
+la lista) saldría de "definitivamente", "final" y "afinar", y las tres
+aparecen en el habla real de este corpus.
+
+**El denominador medía otra cosa que el numerador.** `total` se tomaba sobre el
+texto entero y `queda` sobre las frases ya partidas por `[.!?\n]+`. El split se
+come sus separadores y `_normalizar` recorta la puntuación de borde de cada
+frase, así que la diferencia entre los dos **no eran frases inventadas: era
+puntuación**. El sesgo crece con el largo y con cuánto se puntúe, no con cuánta
+alucinación haya: `pdf_RSD Max- the natural`, 95.941 caracteres, informaba "el
+11 % del texto son frases que Whisper inventa" teniendo adentro seis frases de
+la lista, unos 30 caracteres. Casi todos los avisos sobre textos largos eran
+ese artefacto. El veredicto nunca cambió de sentido, porque el sesgo bajaba el
+resto y el resto bajo es lo que descarta: descartaba de más, nunca de menos.
+
+La lección es la misma en los dos: **una fracción solo significa algo si arriba
+y abajo se miden sobre el mismo texto**, y una comparación de igualdad solo
+detecta lo que viene exactamente igual.
+
 ## Costos reales
 
 | Etapa | Costo |
@@ -735,8 +839,15 @@ coach-brain/
 │   ├── system_coach.md       ← prompt principal
 │   ├── situational_lines.md  ← prompt del tab Líneas
 │   └── extractor.md          ← prompt para destilar transcripts
-├── scripts/                  ← resume, status, watch, transcribe_batches, finalize, smoke_test, upload_to_qdrant_cloud
-├── tests/                    ← VACÍO
+├── scripts/
+│   ├── finalize.ps1          ← los 8 pasos que faltan, en orden; se niega a correr con el pipeline vivo
+│   ├── verificar.py          ← el verificador: huecos, duplicados, pendientes sin VAD
+│   ├── manifest.py           ← escribe INVENTARIO.md y el CSV; aborta si el disco no se pudo recorrer
+│   ├── retranscribir_sin_vad.py  ← la auditoria sin VAD y el detector de alucinaciones
+│   ├── escanear_corpus.py    ← pasa ese detector por el corpus vivo; solo lee
+│   ├── reparar_source_path.py    ← reescribe los source_path muertos (gotcha #26)
+│   └── resume, status, watch, transcribe_batches, smoke_test, upload_to_qdrant_cloud
+├── tests/                    ← 138 tests en 13 archivos; `python -m pytest tests/ -q`
 ├── logs/                     ← UTF-16 (gotcha #5)
 └── qdrant_storage/           ← 38.343 vectores — IRREMPLAZABLE sin re-correr todo
 ```
@@ -755,11 +866,13 @@ coach-brain/
    disco externo en lugar de borrarlo, para no perder la opción de re-transcribir.
 4. **Curación manual** — `data/curated/` sigue vacío. La idea era revisar a mano los
    principios extraídos antes de indexar; nunca se hizo. ¿Vale la pena a esta altura?
-5. **Tests** — ya no está vacío: **107 tests pasando** (`.venv\Scripts\python.exe -m
-   pytest tests/ -q`). Cubren los umbrales del verificador, los cuatro motivos de "sin
-   cubrir", el criterio de duplicado, a quién manda a re-transcribir la auditoría sin
-   VAD y su detector de alucinaciones. Lo que **no** hay son tests del pipeline en sí:
-   transcripción, extracción e indexado siguen sin una sola prueba.
+5. **Tests** — ya no está vacío: **138 tests pasando** en 13 archivos
+   (`.venv\Scripts\python.exe -m pytest tests/ -q`). Cubren los umbrales del
+   verificador, los cuatro motivos de "sin cubrir", el criterio de duplicado, a quién
+   manda a re-transcribir la auditoría sin VAD, su detector de alucinaciones con sus
+   avisos, el piso que protege a `INVENTARIO.md` de un recorrido fallido y el escaneo
+   del corpus vivo. Lo que **no** hay son tests del pipeline en sí: transcripción,
+   extracción e indexado siguen sin una sola prueba.
 6. **Los 9 grupos de contenido duplicado** — el mismo material entró al pipeline dos
    veces con nombres distintos (4 videos de clase, 3 libros, 2 notas de voz). No falta
    nada: sobra texto repetido en el corpus y en el índice, y eso sesga la búsqueda porque
