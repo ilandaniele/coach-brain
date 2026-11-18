@@ -6,8 +6,10 @@
 #   2) Extraccion LOCAL con Ollama/Qwen-14B (resumable)  (kb.extract, backend=ollama)
 #   3) Segunda pasada de extraccion                      (ver OJO 3)
 #   4) Verifica huecos silenciosos del corpus             (scripts\verificar.py)
-#   5) Re-indexa Qdrant desde cero (con --reset)         (kb.index --reset)
-#   6) Levanta el MVP                                     (streamlit)
+#   5) Informa el staging de la auditoria sin VAD        (--juzgar, no promueve)
+#   6) Re-indexa Qdrant desde cero (con --reset)         (kb.index --reset)
+#   7) Regenera INVENTARIO.md                            (scripts\manifest.py)
+#   8) Levanta el MVP                                     (streamlit)
 #
 # OJO 1: Qdrant embebido toma lock de UN proceso. Este script CIERRA cualquier
 #        Streamlit abierto antes de indexar, pero NO toca un proceso del
@@ -21,7 +23,7 @@
 #        durante la corrida no entra en ella. El paso 1 escribe justamente uno.
 #        De ahi la segunda pasada: es barata, porque saltea todo lo que ya tiene
 #        salida en disco.
-# OJO 4: el paso 5 es DESTRUCTIVO: borra y reconstruye las 3 colecciones de
+# OJO 4: el paso 6 es DESTRUCTIVO: borra y reconstruye las 3 colecciones de
 #        Qdrant, que son las que esta sirviendo la app. Pide confirmacion.
 #        Para saltear la pregunta (desatendido): -Yes
 #
@@ -55,7 +57,10 @@ if (-not (Get-Process ollama -ErrorAction SilentlyContinue)) {
 #     etapa del pipeline, este script no sigue. Una extraccion son dias.
 $procs = @(Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue)
 $pipeline = @($procs | Where-Object {
-    $_.CommandLine -and ($_.CommandLine -match "coach_brain\.(kb\.extract|kb\.index|ingest\.)")
+    # Los scripts de scripts/ tambien son trabajo del pipeline: la auditoria
+    # sin VAD son horas de Whisper, y reparar_source_path ESCRIBE transcripts.
+    # Si no estuvieran aca, el bloque de abajo los mataria como "Streamlit".
+    $_.CommandLine -and ($_.CommandLine -match "coach_brain\.(kb\.extract|kb\.index|ingest\.)|retranscribir_sin_vad|reparar_source_path")
 })
 if ($pipeline.Count -gt 0) {
     Write-Host "`nABORTADO: hay $($pipeline.Count) proceso(s) del pipeline corriendo:" -ForegroundColor Red
@@ -87,11 +92,17 @@ Write-Host "`n[3/6] Segunda pasada de extraccion..." -ForegroundColor Cyan
 #    corpus sano igual devuelve 1, porque hay notas de voz cortas que extraen 0
 #    items legitimamente. Corre antes del paso destructivo para que el estado
 #    quede escrito en el log junto al indice que se reconstruye.
-Write-Host "`n[4/6] Verificando huecos del corpus..." -ForegroundColor Cyan
+Write-Host "`n[4/8] Verificando huecos del corpus..." -ForegroundColor Cyan
 & $py -u scripts\verificar.py --sin-audio 2>&1 | Tee-Object -FilePath logs\finalize.log -Append
 
+# 5) Que hay en el staging de la auditoria sin VAD. Solo lectura: no promueve
+#    ni borra nada. Si algo de ahi se va a promover, hay que hacerlo A MANO
+#    ANTES del paso 6, porque el indice se reconstruye desde los transcripts.
+Write-Host "`n[5/8] Auditoria sin VAD (informe, no promueve nada)..." -ForegroundColor Cyan
+& $py -u scripts\retranscribir_sin_vad.py --juzgar 2>&1 | Tee-Object -FilePath logs\finalize.log -Append
+
 # 5) Re-index full con --reset (sino DUPLICA: ver gotcha #12)
-Write-Host "`n[5/6] Indexando en Qdrant (--reset)..." -ForegroundColor Cyan
+Write-Host "`n[6/8] Indexando en Qdrant (--reset)..." -ForegroundColor Cyan
 if (-not $Yes) {
     Write-Host "Esto BORRA las 3 colecciones de Qdrant y las reconstruye." -ForegroundColor Yellow
     Write-Host "Es lo que esta sirviendo la app. El backup esta en qdrant_storage.bak\." -ForegroundColor Yellow
@@ -100,7 +111,13 @@ if (-not $Yes) {
 }
 & $py -u -m coach_brain.kb.index --reset 2>&1 | Tee-Object -FilePath logs\finalize.log -Append
 
-# 5) MVP. El deploy a Fly es aparte y a mano: flyctl deploy (hornea el indice
+# 7) Regenerar el inventario. Es de solo lectura sobre el material y reescribe
+#    INVENTARIO.md, que es el registro de que esta cubierto y que no. Despues
+#    del re-indexado, porque es lo que describe.
+Write-Host "`n[7/8] Regenerando INVENTARIO.md..." -ForegroundColor Cyan
+& $py -u scripts\manifest.py 2>&1 | Tee-Object -FilePath logs\finalize.log -Append
+
+# 8) MVP. El deploy a Fly es aparte y a mano: flyctl deploy (hornea el indice
 #    dentro de la imagen, asi que va DESPUES de este paso).
-Write-Host "`n[6/6] Levantando el MVP en http://localhost:8501 ..." -ForegroundColor Green
+Write-Host "`n[8/8] Levantando el MVP en http://localhost:8501 ..." -ForegroundColor Green
 & $py -u -m streamlit run src\coach_brain\app\streamlit_app.py
