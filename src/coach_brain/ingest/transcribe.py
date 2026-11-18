@@ -56,8 +56,29 @@ def _relpath(p: Path) -> str:
         return str(p)
 
 
+def has_audio_stream(path: Path) -> bool:
+    """True si el contenedor declara al menos una pista de audio.
+
+    Hay videos de WhatsApp grabados con el micrófono apagado: no tienen pista
+    de audio, y sin esta comprobación ffmpeg falla con un error que no dice
+    nada y el archivo queda para siempre en la lista de "sin cubrir" como si
+    fuera un hueco del corpus. No lo es: no hay nada que transcribir.
+    """
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a",
+             "-show_entries", "stream=index", "-of", "csv=p=0", str(path)],
+            capture_output=True, text=True, timeout=120,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return True  # No se pudo verificar: que lo intente ffmpeg.
+    return bool((r.stdout or "").strip())
+
+
 def extract_audio(video_path: Path, audio_path: Path) -> None:
     """Extrae audio a WAV 16kHz mono — formato preferido por Whisper."""
+    if not has_audio_stream(video_path):
+        raise ValueError("el video no tiene pista de audio: no hay nada que transcribir")
     subprocess.run(
         [
             "ffmpeg", "-y", "-i", str(video_path),
@@ -70,12 +91,23 @@ def extract_audio(video_path: Path, audio_path: Path) -> None:
     )
 
 
-def transcribe_file(model, audio_path: Path, source_type: str, source_path: Path) -> dict:
-    """Transcribe un archivo y devuelve dict con el formato unificado."""
+def transcribe_file(
+    model, audio_path: Path, source_type: str, source_path: Path, vad: bool = True
+) -> dict:
+    """Transcribe un archivo y devuelve dict con el formato unificado.
+
+    `vad=False` desactiva el filtro de voz. Sirve para auditar: el VAD decide
+    que no hay habla y devuelve 0 segmentos, y como la etapa es resumable por
+    existencia del JSON, ese vacío nunca se reintenta. Correr sin VAD muestra
+    qué había realmente en el audio. Ojo: sin VAD, Whisper alucina sobre música
+    y ruido — "Gracias por ver el video" o "¡Suscríbete!" repetidos son basura
+    de su corpus de entrenamiento, no contenido. Hay que leer el resultado
+    antes de confiar en él.
+    """
     segments, info = model.transcribe(
         str(audio_path),
         language=settings.whisper_language,
-        vad_filter=True,
+        vad_filter=vad,
         word_timestamps=False,
     )
 
@@ -130,12 +162,16 @@ def _collect_targets() -> list[tuple[Path, str]]:
     return targets
 
 
-def run(force: bool = False, limit: int = 0) -> None:
+def run(force: bool = False, limit: int = 0, sin_vad: bool = False) -> None:
     """Transcribe videos/audios.
 
     limit > 0 procesa como mucho `limit` archivos NUEVOS (los ya hechos no
     cuentan) y luego corta. Pensado para correr de a batches y no trabar la
     maquina con las 155 clases de una. Es resumable: re-llamar sigue donde quedo.
+
+    sin_vad desactiva el filtro de voz; usar junto con --force y --limit para
+    revisar un transcript que quedo vacio. Ver la nota en transcribe_file sobre
+    las alucinaciones de Whisper cuando no hay habla.
     """
     _register_cuda_dlls()
     from faster_whisper import WhisperModel
@@ -161,7 +197,7 @@ def run(force: bool = False, limit: int = 0) -> None:
     console.print(f"[cyan]Transcribiendo {len(targets)} archivo(s)...[/cyan]")
     if limit > 0:
         console.print(f"[cyan]Batch: tope de {limit} archivo(s) nuevos esta corrida.[/cyan]")
-    ok = skip = err = 0
+    ok = skip = err = sin_audio = 0
 
     for src_path, source_type in track(targets, description="Transcribiendo"):
         out_path = out_dir / f"{source_type}_{src_path.stem}.json"
@@ -174,15 +210,23 @@ def run(force: bool = False, limit: int = 0) -> None:
             break
 
         try:
+            if src_path.suffix.lower() in VIDEO_EXT and not has_audio_stream(src_path):
+                console.print(f"[yellow]Sin pista de audio, salteo[/yellow] {src_path.name}")
+                sin_audio += 1
+                continue
             if source_type == "video":
                 tmp_audio = Path(tempfile.gettempdir()) / f"_cb_{src_path.stem}.wav"
                 try:
                     extract_audio(src_path, tmp_audio)
-                    data = transcribe_file(model, tmp_audio, source_type, src_path)
+                    data = transcribe_file(
+                        model, tmp_audio, source_type, src_path, vad=not sin_vad
+                    )
                 finally:
                     tmp_audio.unlink(missing_ok=True)
             else:
-                data = transcribe_file(model, src_path, source_type, src_path)
+                data = transcribe_file(
+                    model, src_path, source_type, src_path, vad=not sin_vad
+                )
 
             out_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
             ok += 1
@@ -195,7 +239,10 @@ def run(force: bool = False, limit: int = 0) -> None:
             console.print(f"[red]Error en {src_path.name}: {e}[/red]")
             err += 1
 
-    console.print(f"[green]Listo[/green] — ok={ok} skip={skip} errores={err}")
+    console.print(
+        f"[green]Listo[/green] — ok={ok} skip={skip} "
+        f"sin_audio={sin_audio} errores={err}"
+    )
 
 
 if __name__ == "__main__":

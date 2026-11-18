@@ -32,6 +32,12 @@ _OCR_ENGINE = None
 # hecha de imagenes cae bajo los 300.
 OCR_MIN_CHARS_PER_PAGE = 400
 
+# Por debajo de esta proporcion de espacios sobre el total de caracteres, el
+# texto extraido es una tira de glifos pegados y no prosa. La mediana del
+# corpus es 0,19 y el texto real mas apretado que hay llega a 0,11; los nueve
+# PDFs roto estaban entre 0,0000 y 0,0507.
+MIN_SPACE_RATIO = 0.08
+
 
 def _ocr_pages(path: Path, dpi: int = 200) -> list[str]:
     """Rasteriza cada pagina y le pasa OCR local (RapidOCR).
@@ -69,6 +75,41 @@ def _ocr_pages(path: Path, dpi: int = 200) -> list[str]:
     return out
 
 
+def _space_ratio(segments: list[dict]) -> float:
+    """Proporcion de espacios sobre el total de caracteres.
+
+    Es el test que distingue prosa de una tira de glifos pegados. En el corpus
+    la mediana es 0,19, y ningun texto real en castellano baja de 0,10.
+    """
+    txt = "".join(seg["text"] for seg in segments)
+    return txt.count(" ") / len(txt) if txt else 0.0
+
+
+def _pymupdf_segments(path: Path) -> list[dict]:
+    """Segmentos por pagina segun pymupdf, o lista vacia si no se puede."""
+    try:
+        import pymupdf  # type: ignore
+    except Exception as e:  # noqa: BLE001
+        console.print(f"[yellow]pymupdf no disponible: {e}[/yellow]")
+        return []
+    out: list[dict] = []
+    try:
+        doc = pymupdf.open(path)
+        try:
+            for i, page in enumerate(doc):
+                text = (page.get_text() or "").strip()
+                if text:
+                    out.append(
+                        {"id": i, "text": text, "start": None, "end": None, "page": i + 1}
+                    )
+        finally:
+            doc.close()
+    except Exception as e:  # noqa: BLE001
+        console.print(f"[yellow]pymupdf falló en {path.name}: {e}[/yellow]")
+        return []
+    return out
+
+
 def extract_pdf(path: Path, ocr: bool = False) -> dict:
     """Extrae texto de un PDF: pypdf, luego pymupdf, y con --ocr rasteriza."""
     reader = PdfReader(path)
@@ -82,24 +123,31 @@ def extract_pdf(path: Path, ocr: bool = False) -> dict:
             segments.append({"id": i, "text": text, "start": None, "end": None, "page": i + 1})
             full_text_parts.append(text)
 
-    if not segments:
-        # Fallback con pymupdf (mejor con layouts raros)
-        try:
-            import pymupdf  # type: ignore
-
-            doc = pymupdf.open(path)
-            for i, page in enumerate(doc):
-                text = (page.get_text() or "").strip()
-                if text:
-                    segments.append(
-                        {"id": i, "text": text, "start": None, "end": None, "page": i + 1}
-                    )
-                    full_text_parts.append(text)
-            doc.close()
-        except Exception as e:  # noqa: BLE001
-            console.print(f"[yellow]pymupdf fallback falló: {e}[/yellow]")
-
     engine = "texto"
+
+    # pypdf no reconstruye los espacios cuando el PDF los implementa como
+    # posicionamiento en vez de glifos. Devuelve la cantidad correcta de
+    # caracteres, asi que pasa cualquier control de volumen, pero el texto es
+    # una tira pegada: "Estoesparaquevayasdiaadia". El LLM no puede extraer
+    # nada de ahi y los vectores quedan sin sentido. pymupdf si los
+    # reconstruye, por geometria. Nueve libros del corpus, 2,4 millones de
+    # caracteres, estaban asi.
+    #
+    # Por eso pymupdf no es solo el fallback de "no salio nada": se compara la
+    # proporcion de espacios y gana el que la tenga mejor.
+    ratio = _space_ratio(segments)
+    if not segments or ratio < MIN_SPACE_RATIO:
+        alt = _pymupdf_segments(path)
+        if alt and _space_ratio(alt) > ratio:
+            if segments:
+                console.print(
+                    f"[cyan]{path.name}: pypdf dio espacios={ratio:.4f}, "
+                    f"uso pymupdf ({_space_ratio(alt):.4f})[/cyan]"
+                )
+            segments = alt
+            full_text_parts = [seg["text"] for seg in segments]
+            engine = "texto-pymupdf"
+
     # El OCR no se dispara solo cuando no hay NADA de texto. Un PDF puede traer
     # una capa de texto casi vacia y seguir siendo ilegible: una exportacion de
     # Canva, por ejemplo, trae los titulos de los cuadros pero el contenido es

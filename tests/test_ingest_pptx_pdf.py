@@ -150,3 +150,97 @@ def test_pdf_sin_texto_con_ocr_queda_como_rapidocr(tmp_path: Path, monkeypatch):
     data = pdfs.extract_pdf(pdf, ocr=True)
     assert data["metadata"]["engine"] == "rapidocr"
     assert [s["text"] for s in data["segments"]] == ["pagina una", "pagina dos"]
+
+
+# --- proporcion de espacios -------------------------------------------------
+#
+# pypdf no reconstruye los espacios cuando el PDF los implementa como
+# posicionamiento en vez de glifos de espacio. Devuelve la cantidad correcta de
+# caracteres, asi que el texto roto pasa cualquier control de volumen, pero es
+# una tira pegada: "Estoesparaquevayasdiaadia". Nueve libros del corpus, 2,4
+# millones de caracteres, se habian indexado asi.
+
+
+class _FakePage:
+    def __init__(self, text: str) -> None:
+        self._text = text
+
+    def extract_text(self) -> str:
+        return self._text
+
+
+class _FakeReader:
+    """Reemplaza a pypdf para poder fijar exactamente lo que devuelve."""
+
+    def __init__(self, textos: list[str]) -> None:
+        self.pages = [_FakePage(t) for t in textos]
+
+
+def _con_pypdf(monkeypatch, textos: list[str]) -> None:
+    monkeypatch.setattr(pdfs, "PdfReader", lambda path: _FakeReader(textos))
+
+
+def test_space_ratio_cuenta_sobre_el_total():
+    assert pdfs._space_ratio([{"text": "a b c d"}]) == pytest.approx(3 / 7)
+    assert pdfs._space_ratio([]) == 0.0
+    assert pdfs._space_ratio([{"text": ""}]) == 0.0
+
+
+def test_pdf_texto_pegado_usa_pymupdf(tmp_path: Path, monkeypatch):
+    """pypdf devuelve volumen correcto sin espacios: gana pymupdf."""
+    _con_pypdf(monkeypatch, ["Estoesparaquevayasdiaadia" * 20])
+    bueno = [{"id": 0, "text": "Esto es para que vayas dia a dia " * 20,
+              "start": None, "end": None, "page": 1}]
+    monkeypatch.setattr(pdfs, "_pymupdf_segments", lambda path: bueno)
+
+    data = pdfs.extract_pdf(tmp_path / "pegado.pdf")
+
+    assert data["metadata"]["engine"] == "texto-pymupdf"
+    assert data["full_text"].startswith("Esto es para que")
+    assert pdfs._space_ratio(data["segments"]) >= pdfs.MIN_SPACE_RATIO
+
+
+def test_pdf_con_espacios_no_consulta_pymupdf(tmp_path: Path, monkeypatch):
+    """Si pypdf ya dio prosa, pymupdf no se toca: es el camino caro."""
+    _con_pypdf(monkeypatch, ["Esto es prosa de verdad con espacios " * 10])
+
+    def no_llamar(path):  # pragma: no cover - no deberia correr
+        raise AssertionError("se llamo a pymupdf sobre texto que ya estaba bien")
+
+    monkeypatch.setattr(pdfs, "_pymupdf_segments", no_llamar)
+    data = pdfs.extract_pdf(tmp_path / "bien.pdf")
+    assert data["metadata"]["engine"] == "texto"
+
+
+def test_pdf_pymupdf_peor_no_reemplaza(tmp_path: Path, monkeypatch):
+    """Si pymupdf no mejora los espacios, se queda el texto de pypdf.
+
+    Es el caso de un PDF escaneado, donde los dos motores devuelven poco y
+    nada: reemplazar seria perder lo poco que pypdf si habia sacado.
+    """
+    _con_pypdf(monkeypatch, ["Aa Bb" + "Ccccccccccccccccccccccccc" * 10])
+    antes = "Aa Bb" + "Ccccccccccccccccccccccccc" * 10
+    monkeypatch.setattr(
+        pdfs, "_pymupdf_segments",
+        lambda path: [{"id": 0, "text": "Ccc", "start": None, "end": None, "page": 1}],
+    )
+
+    data = pdfs.extract_pdf(tmp_path / "escaneado.pdf")
+
+    assert data["metadata"]["engine"] == "texto"
+    assert data["full_text"] == antes
+
+
+def test_pdf_sin_texto_cae_a_pymupdf_igual(tmp_path: Path, monkeypatch):
+    """El fallback viejo sigue vivo: con 0 segmentos, pymupdf entra."""
+    _con_pypdf(monkeypatch, ["", ""])
+    monkeypatch.setattr(
+        pdfs, "_pymupdf_segments",
+        lambda path: [{"id": 0, "text": "pagina con texto", "start": None,
+                       "end": None, "page": 1}],
+    )
+
+    data = pdfs.extract_pdf(tmp_path / "vacio_para_pymupdf.pdf")
+
+    assert data["metadata"]["engine"] == "texto-pymupdf"
+    assert data["segments"][0]["text"] == "pagina con texto"
