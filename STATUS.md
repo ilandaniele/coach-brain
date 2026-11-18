@@ -547,7 +547,7 @@ También `coach <subcomando>` (typer, `src/coach_brain/cli.py`): `ingest-pdfs`, 
   batches activos. Para liberar el lock de Qdrant cierra los Streamlit abiertos, y el
   filtro de eso estaba roto: era `$_.ProcessId -ne $PID`, pero `$PID` es el del PowerShell
   y nunca coincide con un `python.exe`, así que no filtraba nada y se llevaba cualquier
-  python de la máquina, de este proyecto o de otro. Desde `6cb1ddd` mata sólo los que
+  python de la máquina, de este proyecto o de otro. Desde `0ae7bec` mata sólo los que
   tienen `streamlit` en la línea de comando; si otra cosa tiene el lock, el paso 7 falla
   con el error de Qdrant a la vista en vez de perder trabajo ajeno en silencio.
   `tests\test_finalize_ps1.py` fija el orden de los nueve pasos, las dos guardas (el abort
