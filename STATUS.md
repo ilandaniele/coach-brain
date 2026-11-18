@@ -44,14 +44,25 @@ No hay nada que re-transcribir. Conteos verificados en disco (2026-11-17, 23:50)
 | Etapa | Salida | Cantidad |
 |---|---|---|
 | Transcripción | `data/processed/transcripts/*.json` | **8838** |
-| Extracción LLM | `data/processed/extracted/*.json` | **8535**, más 303 en curso con Ollama |
+| Extracción LLM | `data/processed/extracted/*.json` | **8539**, más 299 en curso con Ollama (2026-11-18, 04:30) |
 | Índice Qdrant | `qdrant_storage/` | **38.343** vectores, del índice viejo |
 
-Los 303 que faltan no son un hueco nuevo: 250 son extracciones que se mandaron a
+Los 299 que faltan no son un hueco nuevo: 250 son extracciones que se mandaron a
 re-destilar a propósito (`data/processed/_reextraer/`: 244 notas de WhatsApp y 5 PDF
 reconstruidos), 44 estaban vacías y quedaron respaldadas en `_extracted_empty_backup/`,
 y el resto son transcripts nuevos. El índice que sirve hoy se armó antes de todo esto,
 así que todavía no los tiene: hay que reconstruirlo cuando la extracción termine.
+
+**ETA medido (2026-11-18, 04:30).** Lo que queda son 17,1 M de caracteres de texto
+fuente, y el 95 % está en 33 archivos: los libros largos (`Despertando al Gigante
+Interior`, 1,37 M; `El arte de la seducción`, 1,34 M; `El método`, 0,91 M) y sobre todo
+`whatsapp_images_chats`, que con 2,66 M es el más grande de todos porque junta el OCR de
+8978 capturas en un solo transcript. Los otros 262 son notas de voz cortas y se van a
+despachar rápido. El ritmo real de Ollama local sobre los dos PDFs que terminaron en
+las últimas 2,4 h es de **345 000 caracteres por hora**, así que faltan unas **50 horas**
+—termina alrededor del 2026-11-20 a la mañana— y conviene no tocar la GPU hasta
+entonces. El avance se mira con `ls data/processed/extracted | wc -l` o en
+`logs/extract_fix.log`, que es UTF-16 (gotcha #5).
 
 Desglose de las 8838 fuentes:
 
@@ -890,7 +901,7 @@ coach-brain/
 │   │   └── _drive_dump/          ← vacío
 │   ├── processed/
 │   │   ├── transcripts/      ← 8838 JSON unificados
-│   │   ├── extracted/        ← 8535 .extracted.json (+303 en curso)
+│   │   ├── extracted/        ← 8539 .extracted.json (+299 en curso)
 │   │   ├── whatsapp_images_ocr/  ← 8953 salidas de RapidOCR
 │   │   └── whatsapp_images/
 │   └── curated/              ← vacío (curación manual nunca se hizo)
