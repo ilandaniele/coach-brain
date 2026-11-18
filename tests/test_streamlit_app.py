@@ -6,9 +6,15 @@ Qdrant y bge-m3. Así que se compila **solo la mitad de arriba** en un módulo
 propio. Una prueba se encarga de que el marcador siga existiendo una sola
 vez, para que este archivo no quede probando otra cosa en silencio.
 
-Lo que se cubre: la firma de la cookie y el throttling del PIN (la app está
-publicada en internet, es lo único que la separa de cualquiera), el OCR del
-chat, los errores de proveedor traducidos, y el armado de los prompts.
+Lo que se cubre: el gate de login entero —la firma de la cookie, el throttling
+del PIN y el orden en que `require_login` los usa (la app está publicada en
+internet, es lo único que la separa de cualquiera)—, la cookie que se escribe
+desde el iframe, el warmup de Qdrant y bge-m3, el OCR del chat, los errores de
+proveedor traducidos, el armado de los prompts y el render de la respuesta.
+
+Con eso la mitad de arriba del archivo queda cubierta entera. Lo que falta de
+`streamlit_app.py` es el cuerpo de la UI, abajo del marcador: son llamadas a
+`st` encadenadas que necesitan el runtime de Streamlit para correr.
 """
 
 from __future__ import annotations
@@ -17,6 +23,7 @@ import base64
 import hashlib
 import hmac
 import io
+import sys
 import time
 import types
 from pathlib import Path
@@ -737,3 +744,521 @@ def test_el_prompt_situacional_tiene_los_placeholders(app):
 def test_el_nucleo_de_principios_no_quedo_vacio(app):
     assert len(app.PRINCIPLES_CORE.strip()) > 100
 
+
+
+# ===========================================================================
+# El gate de login: require_login
+# ===========================================================================
+# Es lo único que separa la app publicada en Fly.io de cualquiera que tenga la
+# URL, y hasta acá estaba sin probar: se probaban las piezas (la firma, el
+# backoff) pero no el orden en que las usa.
+
+
+class Parada(Exception):
+    """Lo que hace `st.stop()`: corta el script de la página."""
+
+
+class Rerun(Exception):
+    """Lo que hace `st.rerun()`."""
+
+
+class StFalso:
+    """Un `st` con lo justo que toca `require_login`.
+
+    `session_state` es un dict de verdad porque el código usa `.get`, `.pop` y
+    asignación por clave, que es exactamente la API que Streamlit expone.
+    """
+
+    def __init__(self, headers=None, pin_tecleado="", boton=False, estado=None):
+        self.context = types.SimpleNamespace(headers=headers or {})
+        self.session_state = dict(estado or {})
+        self.pin_tecleado = pin_tecleado
+        self.boton = boton
+        self.titulos: list[str] = []
+        self.errores: list[str] = []
+        self.inputs: list[dict] = []
+        self.markdowns: list[str] = []
+        self.codigos: list[str] = []
+        self.divisores = 0
+
+    def title(self, t):
+        self.titulos.append(t)
+
+    def error(self, t):
+        self.errores.append(t)
+
+    def markdown(self, t):
+        self.markdowns.append(t)
+
+    def code(self, t, language=None):
+        self.codigos.append(t)
+
+    def divider(self):
+        self.divisores += 1
+
+    def text_input(self, label, type=None, key=None):  # noqa: A002
+        self.inputs.append({"label": label, "type": type, "key": key})
+        return self.pin_tecleado
+
+    def button(self, label, type=None):  # noqa: A002
+        return self.boton
+
+    def stop(self):
+        raise Parada
+
+    def rerun(self):
+        raise Rerun
+
+
+@pytest.fixture
+def gate(app, monkeypatch, intentos):
+    """Deja `require_login` llamable: `st` falso, cookie falsa y sin sleep.
+
+    El `sleep(1)` del camino del PIN incorrecto es a propósito (frena el
+    guessing), pero multiplicado por los tests de acá serían segundos de suite.
+    """
+    monkeypatch.setattr(settings, "app_password", "1234")
+    cookies: list[tuple[str, int]] = []
+    monkeypatch.setattr(app, "_write_cookie", lambda t, m: cookies.append((t, m)))
+    dormidas: list[float] = []
+    monkeypatch.setattr(app.time, "sleep", lambda s: dormidas.append(s))
+
+    def armar(**kw):
+        st = StFalso(**kw)
+        monkeypatch.setattr(app, "st", st)
+        return st
+
+    return {"armar": armar, "cookies": cookies, "dormidas": dormidas}
+
+
+def test_sin_pin_configurado_no_pide_nada(app, gate, monkeypatch):
+    """Uso local: `COACH_APP_PASSWORD` vacío deja la app abierta a propósito.
+    Tiene que salir antes de tocar `st`, porque corriendo local no hay headers."""
+    monkeypatch.setattr(settings, "app_password", "")
+    st = gate["armar"]()
+
+    app.require_login()  # no levanta Parada
+
+    assert st.titulos == [], "no dibujo el formulario"
+    assert st.inputs == []
+
+
+def test_una_sesion_ya_autenticada_pasa_derecho(app, gate):
+    st = gate["armar"](estado={"_authed": True})
+
+    app.require_login()
+
+    assert st.inputs == [], "no volvio a pedir el PIN"
+    assert gate["cookies"] == []
+
+
+def test_la_cookie_pendiente_se_escribe_en_el_rerun_siguiente(app, gate):
+    """El componente HTML no llega a renderizar si se dispara justo antes de
+    `st.rerun()`, así que el token queda guardado y se escribe en la pasada
+    siguiente. Sin esto, cada visita vuelve a pedir el PIN."""
+    st = gate["armar"](estado={"_authed": True, "_set_cookie": "tok-firmado"})
+
+    app.require_login()
+
+    assert gate["cookies"] == [("tok-firmado", app._COOKIE_TTL)]
+    assert "_set_cookie" not in st.session_state, "no se escribe dos veces"
+
+
+def test_una_cookie_valida_entra_sin_pin(app, gate):
+    """El caso del día a día en el celular: 30 días sin volver a tipear."""
+    token = app._sign_token(int(time.time()) + 60)
+    st = gate["armar"](headers={"Cookie": f"coach_auth={token}"})
+
+    app.require_login()
+
+    assert st.session_state["_authed"] is True
+    assert st.inputs == []
+
+
+def test_una_cookie_adulterada_vuelve_a_pedir_el_pin(app, gate):
+    st = gate["armar"](headers={"Cookie": "coach_auth=99999999999.0000"})
+
+    with pytest.raises(Parada):
+        app.require_login()
+
+    assert st.inputs and st.inputs[0]["type"] == "password"
+    assert "_authed" not in st.session_state
+
+
+def test_el_pin_correcto_autentica_y_firma_la_cookie(app, gate):
+    st = gate["armar"](pin_tecleado="1234", boton=True)
+
+    with pytest.raises(Rerun):
+        app.require_login()
+
+    assert st.session_state["_authed"] is True
+    assert app._token_valid(st.session_state["_set_cookie"]) is True
+
+
+def test_el_pin_correcto_limpia_los_fallos_de_esa_ip(app, gate, intentos):
+    """Si no se limpiaran, entrar bien después de cuatro errores dejaría a la
+    IP a un fallo del bloqueo."""
+    intentos["_global"] = [time.time()] * 4
+    gate["armar"](pin_tecleado="1234", boton=True)
+
+    with pytest.raises(Rerun):
+        app.require_login()
+
+    assert "_global" not in intentos
+
+
+def test_los_espacios_alrededor_del_pin_no_cuentan(app, gate):
+    """El teclado del celu agrega uno solo con autocompletar."""
+    st = gate["armar"](pin_tecleado="  1234 ", boton=True)
+
+    with pytest.raises(Rerun):
+        app.require_login()
+
+    assert st.session_state["_authed"] is True
+
+
+def test_el_pin_incorrecto_se_anota_y_avisa_cuantos_quedan(app, gate, intentos):
+    st = gate["armar"](pin_tecleado="0000", boton=True)
+
+    with pytest.raises(Parada):
+        app.require_login()
+
+    assert len(intentos["_global"]) == 1
+    assert "4 intento" in st.errores[-1]
+    assert "_authed" not in st.session_state
+
+
+def test_el_quinto_fallo_avisa_que_quedo_bloqueada(app, gate, intentos):
+    intentos["_global"] = [time.time()] * 4
+    st = gate["armar"](pin_tecleado="0000", boton=True)
+
+    with pytest.raises(Parada):
+        app.require_login()
+
+    assert "bloqueada" in st.errores[-1].lower()
+
+
+def test_cada_fallo_cuesta_un_segundo(app, gate):
+    """El `sleep` es parte de la defensa: sin él, 10.000 combinaciones de un PIN
+    de 4 dígitos se prueban en minutos."""
+    gate["armar"](pin_tecleado="0000", boton=True)
+
+    with pytest.raises(Parada):
+        app.require_login()
+
+    assert gate["dormidas"] == [1]
+
+
+def test_sin_tocar_el_boton_no_se_cuenta_ningun_fallo(app, gate, intentos):
+    """El primer render de la página: el input está vacío y nadie apretó nada.
+
+    `_lock_remaining` deja la clave de la IP con la lista podada, así que lo que
+    se mira es la cuenta de fallos, no la presencia de la clave."""
+    gate["armar"](pin_tecleado="", boton=False)
+
+    with pytest.raises(Parada):
+        app.require_login()
+
+    assert intentos.get("_global", []) == []
+
+
+def test_bloqueado_no_se_muestra_ni_el_campo_del_pin(app, gate, intentos):
+    """Mientras corre el backoff no hay nada que tipear: si el campo siguiera
+    ahí, cada intento reiniciaría el contador de la ventana."""
+    intentos["_global"] = [time.time()] * 6
+    st = gate["armar"](pin_tecleado="1234", boton=True)
+
+    with pytest.raises(Parada):
+        app.require_login()
+
+    assert st.inputs == []
+    assert "_authed" not in st.session_state
+
+
+def test_el_aviso_del_bloqueo_dice_cuanto_falta(app, gate, intentos):
+    """60 s de backoff con 6 fallos: el mensaje tiene que leerse en minutos y
+    segundos, no en una cuenta cruda."""
+    intentos["_global"] = [time.time()] * 6
+    st = gate["armar"]()
+
+    with pytest.raises(Parada):
+        app.require_login()
+
+    assert "1m 00s" in st.errores[-1] or "0m 59s" in st.errores[-1]
+
+
+def test_el_bloqueo_de_otra_ip_no_frena(app, gate, intentos):
+    intentos["9.9.9.9"] = [time.time()] * 10
+    st = gate["armar"](
+        headers={"Fly-Client-IP": "1.2.3.4"}, pin_tecleado="1234", boton=True
+    )
+
+    with pytest.raises(Rerun):
+        app.require_login()
+
+    assert st.session_state["_authed"] is True
+
+
+# ===========================================================================
+# La cookie que se escribe desde el iframe
+# ===========================================================================
+# `components.html` corre en un iframe, así que el script tiene que escribirle
+# la cookie al documento padre. Los flags no son decorativos: sin `Secure` la
+# cookie de sesión viaja en claro, y sin `path=/` no llega a las otras páginas.
+
+
+@pytest.fixture
+def componentes(monkeypatch):
+    """Reemplaza `streamlit.components.v1` por uno que anota el HTML.
+
+    Se parchea el atributo del paquete además de `sys.modules`: con streamlit
+    instalado de verdad, `import streamlit.components.v1 as x` resuelve por
+    atributo del padre y se quedaría con el real.
+    """
+    import streamlit.components as comps
+
+    llamadas: list[dict] = []
+    falso = types.ModuleType("streamlit.components.v1")
+    falso.html = lambda s, height=None, width=None: llamadas.append(
+        {"html": s, "height": height, "width": width}
+    )
+    monkeypatch.setattr(comps, "v1", falso)
+    monkeypatch.setitem(sys.modules, "streamlit.components.v1", falso)
+    return llamadas
+
+
+def test_la_cookie_sale_con_todos_los_flags(app, componentes):
+    app._write_cookie("tok-abc", 3600)
+
+    html = componentes[0]["html"]
+    assert "coach_auth=tok-abc" in html
+    assert "path=/" in html
+    assert "max-age=3600" in html
+    assert "SameSite=Lax" in html
+    assert "Secure" in html, "sin esto la cookie de sesion viaja en claro"
+
+
+def test_la_cookie_se_escribe_en_el_documento_padre(app, componentes):
+    """Desde el iframe, `document.cookie` sería la del iframe y no serviría."""
+    app._write_cookie("t", 1)
+    assert "window.parent.document.cookie" in componentes[0]["html"]
+
+
+def test_el_componente_no_ocupa_lugar(app, componentes):
+    """Es un script, no UI: con alto por default metería un hueco blanco."""
+    app._write_cookie("t", 1)
+    assert componentes[0]["height"] == 0
+    assert componentes[0]["width"] == 0
+
+
+def test_el_logout_vence_la_cookie_y_borra_la_sesion(app, componentes, monkeypatch):
+    st = StFalso(estado={"_authed": True})
+    monkeypatch.setattr(app, "st", st)
+
+    app.logout()
+
+    assert "max-age=0" in componentes[0]["html"], "la cookie tiene que vencer ya"
+    assert "coach_auth=;" in componentes[0]["html"]
+    assert "_authed" not in st.session_state
+
+
+def test_el_logout_sin_sesion_no_explota(app, componentes, monkeypatch):
+    """Se puede apretar dos veces, o entrar al link con la cookie ya vencida."""
+    monkeypatch.setattr(app, "st", StFalso())
+    app.logout()
+    assert componentes
+
+
+# ===========================================================================
+# _client: la key de Anthropic
+# ===========================================================================
+
+
+def test_sin_api_key_se_avisa_y_se_corta(app, monkeypatch):
+    """Sin esto, el error aparecería recién en la llamada al modelo, después de
+    que el usuario escribió toda la consulta."""
+    monkeypatch.setattr(settings, "anthropic_api_key", "")
+    st = StFalso()
+    monkeypatch.setattr(app, "st", st)
+
+    with pytest.raises(Parada):
+        app._client()
+
+    assert "ANTHROPIC_API_KEY" in st.errores[0]
+
+
+def test_con_api_key_se_construye_el_cliente(app, monkeypatch):
+    monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-de-prueba")
+    construidos: list[dict] = []
+    monkeypatch.setattr(app, "Anthropic", lambda **kw: construidos.append(kw) or "cli")
+    monkeypatch.setattr(app, "st", StFalso())
+
+    assert app._client() == "cli"
+    assert construidos == [{"api_key": "sk-ant-de-prueba"}]
+
+
+# ===========================================================================
+# warmup: el costo que se paga antes de la primera consulta
+# ===========================================================================
+
+
+@pytest.fixture
+def warmup_limpio(app):
+    """`st.cache_resource` es del proceso: sin limpiar, el primer test se lleva
+    el resultado y los demás no ejecutan nada."""
+    app.warmup.clear()
+    yield
+    app.warmup.clear()
+
+
+@pytest.fixture
+def motores(monkeypatch):
+    """Anota qué se cargó, sin cargar Qdrant ni bge-m3 de verdad."""
+    from coach_brain.kb import embed as E
+    from coach_brain.kb import index as I
+
+    visto: dict = {"qdrant": 0, "model": 0, "encode": []}
+    monkeypatch.setattr(I, "get_qdrant", lambda: visto.__setitem__("qdrant", visto["qdrant"] + 1))
+    monkeypatch.setattr(E, "get_model", lambda: visto.__setitem__("model", visto["model"] + 1))
+    monkeypatch.setattr(E, "embed_one", lambda t: visto["encode"].append(t))
+    return visto
+
+
+def test_el_warmup_carga_el_modelo_y_lo_hace_inferir(app, motores, warmup_limpio, monkeypatch):
+    """El encode dummy es el punto: construir el modelo NO materializa los pesos,
+    y la primera inferencia real tardaba ~145 s adentro de la consulta del
+    usuario. Acá se paga con spinner."""
+    monkeypatch.setattr(settings, "qdrant_url", "")
+
+    assert app.warmup() is True
+
+    assert motores["model"] == 1
+    assert len(motores["encode"]) == 1, "sin el encode los pesos no se paginan"
+
+
+def test_sin_url_el_warmup_abre_el_qdrant_embebido(app, motores, warmup_limpio, monkeypatch):
+    monkeypatch.setattr(settings, "qdrant_url", "")
+    app.warmup()
+    assert motores["qdrant"] == 1
+
+
+def test_con_url_el_warmup_no_abre_el_embebido(app, motores, warmup_limpio, monkeypatch):
+    """En Fly.io el índice es remoto: abrir el embebido tomaría el file lock de
+    un storage vacío."""
+    monkeypatch.setattr(settings, "qdrant_url", "https://qdrant.ejemplo:6333")
+    app.warmup()
+    assert motores["qdrant"] == 0
+    assert motores["model"] == 1
+
+
+def test_el_warmup_se_corre_una_sola_vez(app, motores, warmup_limpio, monkeypatch):
+    """`st.cache_resource` serializa las llamadas concurrentes: con varias
+    sesiones abiertas, el modelo se construye una vez."""
+    monkeypatch.setattr(settings, "qdrant_url", "")
+    app.warmup()
+    app.warmup()
+    assert motores["model"] == 1
+
+
+# ===========================================================================
+# render_answer y el OCR cacheado
+# ===========================================================================
+
+
+def test_las_lineas_se_muestran_en_bloques_copiables(app, monkeypatch):
+    """Un tap copia el bloque en el celu, que es como se usa la app."""
+    st = StFalso()
+    monkeypatch.setattr(app, "st", st)
+    monkeypatch.setattr(app, "extract_quoted_lines", lambda a: ["linea uno", "linea dos"])
+
+    app.render_answer("respuesta completa", "k")
+
+    assert st.codigos == ["linea uno", "linea dos"]
+    assert st.divisores == 1
+    assert st.markdowns[-1] == "respuesta completa", "la respuesta entera va igual"
+
+
+def test_sin_lineas_sueltas_solo_va_la_respuesta(app, monkeypatch):
+    st = StFalso()
+    monkeypatch.setattr(app, "st", st)
+    monkeypatch.setattr(app, "extract_quoted_lines", lambda a: [])
+
+    app.render_answer("solo texto", "k")
+
+    assert st.codigos == []
+    assert st.divisores == 0
+    assert st.markdowns == ["solo texto"]
+
+
+def test_el_ocr_se_construye_una_sola_vez(app, monkeypatch):
+    """RapidOCR carga los modelos ONNX al construirse: una vez por imagen
+    pegada sería medio segundo de más en cada pegada."""
+    construidos: list[int] = []
+    modulo = types.ModuleType("rapidocr_onnxruntime")
+    modulo.RapidOCR = lambda: construidos.append(1) or "motor"
+    monkeypatch.setitem(sys.modules, "rapidocr_onnxruntime", modulo)
+    app._get_ocr.clear()
+    try:
+        assert app._get_ocr() == "motor"
+        assert app._get_ocr() == "motor"
+        assert construidos == [1]
+    finally:
+        app._get_ocr.clear()
+
+
+# ===========================================================================
+# Los tres caminos que quedaban
+# ===========================================================================
+
+
+def test_si_el_contexto_explota_la_cookie_sale_vacia(app, monkeypatch):
+    """Fuera del runtime de Streamlit (un test, un script) `st.context` levanta.
+    Devolver "" manda al PIN, que es el lado seguro: una excepción acá dejaría
+    la página en blanco sin gate."""
+
+    class Explota:
+        @property
+        def headers(self):
+            raise RuntimeError("sin runtime")
+
+    monkeypatch.setattr(app, "st", types.SimpleNamespace(context=Explota()))
+    assert app._cookie_token() == ""
+
+
+def test_una_caja_vacia_del_ocr_no_corta_el_barrido_del_encabezado(app, monkeypatch):
+    """RapidOCR devuelve cajas con texto vacío cuando agarra un ícono (la flecha
+    de volver, el avatar). Si cortaran el barrido en vez de saltearse, el nombre
+    del contacto quedaría sin detectar y el chat sin encabezado."""
+    poner_ocr(app, monkeypatch, [
+        (caja(20, 2, 40, 8), "   ", 0.9),          # un icono: texto vacio
+        (caja(20, 4, 60, 10), "Meli en línea", 0.9),
+        (caja(5, 40, 50, 50), "hola", 0.9),
+    ])
+
+    chat, _crudo = app.ocr_chat_from_image(imagen())
+
+    assert "Meli" not in chat, "el encabezado se reconocio y no quedo como mensaje"
+    assert "[ella] hola" in chat
+
+
+def test_el_material_recuperado_entra_en_el_prompt_situacional(app, llm, situacional):
+    """Es el RAG: sin este bloque, el situacional contesta con el prompt base y
+    los 38.343 vectores del índice no aportan nada."""
+    app.call_situational("ollama", "m", "en el gym", "una apertura", "JUGUETON",
+                         {"principles_retrieved": "PRINC-X",
+                          "situations_retrieved": "SIT-X",
+                          "style_retrieved": "FRASE-X"}, "", "")
+
+    assert "PRINC-X" in llm["user"]
+    assert "SIT-X" in llm["user"]
+    assert "FRASE-X" in llm["user"]
+
+
+def test_un_recuperado_incompleto_no_rompe_el_prompt(app, llm, situacional):
+    """`format_for_prompt()` puede devolver una colección vacía si el filtro no
+    matcheó nada. Con `.get` el bloque sale igual, sin un KeyError que se comería
+    la consulta entera."""
+    app.call_situational("ollama", "m", "s", "n", "m",
+                         {"principles_retrieved": "SOLO-PRINC"}, "", "")
+
+    assert "SOLO-PRINC" in llm["user"]
