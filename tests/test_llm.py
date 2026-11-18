@@ -16,11 +16,17 @@ se fija acá:
 4. **`complete_fast()` nunca levanta.** Es la que usan las tareas chicas
    (detectar un nombre, resumir un perfil) y devuelve `""` si no hay ningún
    backend; si levantara, una tarea opcional cortaría la respuesta principal.
+5. **Los dos backends propios mandan lo que tienen que mandar.** `_ollama` con
+   `stream: False` y `num_ctx: 10240`, `_anthropic` juntando solo los bloques
+   con `.text`. Son los dos con los que contesta el MVP: uno gratis y local, el
+   otro pago.
 
 No se hace una sola llamada de red: `httpx.post` es un doble.
 """
 
 from __future__ import annotations
+
+import sys
 
 import pytest
 
@@ -301,3 +307,211 @@ def test_si_hasta_anthropic_falla_devuelve_vacio(sin_backends, monkeypatch):
     monkeypatch.setattr(L, "_anthropic", lambda *a, **k: (_ for _ in ()).throw(
         RuntimeError("overloaded")))
     assert L.complete_fast(system="s", user="u") == ""
+
+
+# --- 6) _ollama(): el backend local, el que contesta gratis -----------------
+
+
+class RespOllama:
+    """Lo mínimo que `_ollama` le pide: `raise_for_status` y `json`."""
+
+    def __init__(self, payload=None, error=None):
+        self._payload = payload if payload is not None else {
+            "message": {"content": "desde ollama"}
+        }
+        self._error = error
+
+    def raise_for_status(self):
+        if self._error:
+            raise self._error
+
+    def json(self):
+        return self._payload
+
+
+@pytest.fixture
+def post_ollama(monkeypatch):
+    """`httpx.post` para la rama de Ollama, que manda la URL por posición."""
+    llamadas: list[dict] = []
+    respuesta = {"r": RespOllama()}
+
+    def fake(url, json=None, timeout=None, **kw):
+        llamadas.append({"url": url, "json": json or {}, "timeout": timeout})
+        return respuesta["r"]
+
+    monkeypatch.setattr(L.httpx, "post", fake)
+    return {"llamadas": llamadas, "set": lambda r: respuesta.__setitem__("r", r)}
+
+
+def test_ollama_pega_en_api_chat_del_host_configurado(post_ollama, monkeypatch):
+    monkeypatch.setattr(settings, "ollama_host", "http://127.0.0.1:11434")
+    L._ollama("s", "u", 0.7)
+    assert post_ollama["llamadas"][0]["url"] == "http://127.0.0.1:11434/api/chat"
+
+
+def test_ollama_manda_el_modelo_de_settings(post_ollama, monkeypatch):
+    monkeypatch.setattr(settings, "ollama_model", "qwen2.5:14b-instruct")
+    L._ollama("s", "u", 0.7)
+    assert post_ollama["llamadas"][0]["json"]["model"] == "qwen2.5:14b-instruct"
+
+
+def test_ollama_manda_los_dos_mensajes_en_orden(post_ollama):
+    L._ollama("sos un coach", "que le digo", 0.7)
+    msgs = post_ollama["llamadas"][0]["json"]["messages"]
+    assert msgs == [
+        {"role": "system", "content": "sos un coach"},
+        {"role": "user", "content": "que le digo"},
+    ]
+
+
+def test_ollama_pide_la_respuesta_sin_stream(post_ollama):
+    """Con `stream: True` el body son varios JSON pegados y `r.json()` revienta."""
+    L._ollama("s", "u", 0.7)
+    assert post_ollama["llamadas"][0]["json"]["stream"] is False
+
+
+def test_ollama_pide_un_contexto_de_10240(post_ollama):
+    """Más grande que el 6144 de la extracción (ver `kb/extract.py`): acá entra
+    el prompt con los fragmentos recuperados, no un chunk de 5000 caracteres."""
+    L._ollama("s", "u", 0.7)
+    assert post_ollama["llamadas"][0]["json"]["options"]["num_ctx"] == 10240
+
+
+def test_ollama_pasa_la_temperatura_que_le_dieron(post_ollama):
+    L._ollama("s", "u", 0.25)
+    assert post_ollama["llamadas"][0]["json"]["options"]["temperature"] == 0.25
+
+
+def test_ollama_espera_hasta_300_segundos(post_ollama):
+    """Un modelo de 14B en CPU tarda minutos. Con el timeout por omisión de
+    httpx (5 s) toda respuesta larga seria un error."""
+    L._ollama("s", "u", 0.7)
+    assert post_ollama["llamadas"][0]["timeout"] == 300
+
+
+def test_ollama_devuelve_el_contenido_del_mensaje(post_ollama):
+    post_ollama["set"](RespOllama({"message": {"content": "andá de frente"}}))
+    assert L._ollama("s", "u", 0.7) == "andá de frente"
+
+
+def test_ollama_propaga_el_error_http(post_ollama):
+    """`complete_fast` lo atrapa y sigue con el próximo backend; que levante es
+    la única forma de que esa cadena funcione."""
+    post_ollama["set"](RespOllama(error=OSError("conexion rechazada")))
+    with pytest.raises(OSError, match="conexion rechazada"):
+        L._ollama("s", "u", 0.7)
+
+
+def test_ollama_con_otra_forma_de_respuesta_levanta(post_ollama):
+    """A diferencia de la rama OpenAI-compatible, acá no hay traducción a
+    `RuntimeError`: sale el `KeyError` crudo. `complete_fast` lo atrapa igual,
+    pero `complete(backend="ollama")` lo deja pasar tal cual."""
+    post_ollama["set"](RespOllama({"error": "model not found"}))
+    with pytest.raises(KeyError):
+        L._ollama("s", "u", 0.7)
+
+
+# --- 7) _anthropic(): el backend pago --------------------------------------
+
+
+class BloqueTexto:
+    def __init__(self, text):
+        self.text = text
+
+
+class BloqueSinTexto:
+    """Un bloque de thinking: viene en `content` y no tiene `.text`."""
+
+
+class RespAnthropic:
+    def __init__(self, content):
+        self.content = content
+
+
+def anthropic_falso(monkeypatch, respuesta, error=None):
+    """Reemplaza el `from anthropic import Anthropic` que hace `_anthropic`."""
+    registro: dict = {"construido": [], "create": []}
+
+    class Mensajes:
+        def create(self, **kw):
+            registro["create"].append(kw)
+            if error:
+                raise error
+            return respuesta
+
+    class Cliente:
+        def __init__(self, **kw):
+            registro["construido"].append(kw)
+            self.messages = Mensajes()
+
+    modulo = type(sys)("anthropic")
+    modulo.Anthropic = Cliente
+    monkeypatch.setitem(sys.modules, "anthropic", modulo)
+    return registro
+
+
+def test_anthropic_construye_el_cliente_con_la_key_de_settings(monkeypatch):
+    monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-de-prueba")
+    reg = anthropic_falso(monkeypatch, RespAnthropic([BloqueTexto("ok")]))
+
+    L._anthropic("s", "u", "claude-x", 100, 0.7)
+
+    assert reg["construido"] == [{"api_key": "sk-ant-de-prueba"}]
+
+
+def test_anthropic_manda_system_aparte_del_mensaje(monkeypatch):
+    """La API de Anthropic no acepta un mensaje con `role: system`: el prompt de
+    sistema es un parámetro propio."""
+    reg = anthropic_falso(monkeypatch, RespAnthropic([BloqueTexto("ok")]))
+
+    L._anthropic("sos un coach", "que le digo", "claude-x", 100, 0.7)
+
+    kw = reg["create"][0]
+    assert kw["system"] == "sos un coach"
+    assert kw["messages"] == [{"role": "user", "content": "que le digo"}]
+
+
+def test_anthropic_pasa_modelo_tokens_y_temperatura(monkeypatch):
+    reg = anthropic_falso(monkeypatch, RespAnthropic([BloqueTexto("ok")]))
+
+    L._anthropic("s", "u", "claude-sonnet-4-5", 1234, 0.3)
+
+    kw = reg["create"][0]
+    assert kw["model"] == "claude-sonnet-4-5"
+    assert kw["max_tokens"] == 1234
+    assert kw["temperature"] == 0.3
+
+
+def test_anthropic_junta_los_bloques_de_texto(monkeypatch):
+    anthropic_falso(
+        monkeypatch,
+        RespAnthropic([BloqueTexto("primero "), BloqueTexto("segundo")]),
+    )
+    assert L._anthropic("s", "u", "m", 100, 0.7) == "primero segundo"
+
+
+def test_anthropic_saltea_los_bloques_sin_texto(monkeypatch):
+    """Un bloque de thinking no tiene `.text`; sin el filtro, el `join` tira
+    `AttributeError` y la respuesta se pierde entera."""
+    anthropic_falso(
+        monkeypatch,
+        RespAnthropic([BloqueSinTexto(), BloqueTexto("la respuesta")]),
+    )
+    assert L._anthropic("s", "u", "m", 100, 0.7) == "la respuesta"
+
+
+def test_anthropic_sin_bloques_devuelve_vacio(monkeypatch):
+    anthropic_falso(monkeypatch, RespAnthropic([]))
+    assert L._anthropic("s", "u", "m", 100, 0.7) == ""
+
+
+def test_anthropic_propaga_el_error_de_la_api(monkeypatch):
+    """Es lo que hace que `complete_fast` caiga al siguiente backend y que
+    `complete(backend="anthropic")` muestre el motivo real (cuota, key)."""
+    anthropic_falso(
+        monkeypatch,
+        RespAnthropic([]),
+        error=RuntimeError("credit balance is too low"),
+    )
+    with pytest.raises(RuntimeError, match="credit balance"):
+        L._anthropic("s", "u", "m", 100, 0.7)
