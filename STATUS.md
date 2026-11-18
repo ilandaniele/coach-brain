@@ -32,7 +32,7 @@ Overview y setup en `README.md`. Este archivo es el estado operativo y los gotch
 | Qdrant | OK (local embebido) | persiste en `./qdrant_storage/` |
 | Material del coach | OK | **`C:\Users\Ilan\Desktop\Ilan\Seduccion`** (360GB) — las tres junctions de `data/raw` apuntan ahi y resuelven bien; ver gotcha #7 |
 | Deploy Fly.io | OK | app `coach-brain-ilan`, región `iad`, 4GB / 2 vCPU shared, siempre prendida |
-| Tests | OK | **1056 pasando + 1 salteado** en 37 archivos: `.venv\Scripts\python.exe -m pytest tests/ -q`, ~20 s, sin GPU ni red. Cobertura **100 % con ramas** sobre `src/coach_brain`, con el piso puesto en `fail_under = 100` en `pyproject.toml`; CI no la mide (pytest-cov no está en `requirements-ci.txt`), la sostiene la corrida local `python -m coverage run -m pytest -q && python -m coverage report`. Además `scripts\smoke_test.py --quick` |
+| Tests | OK | **1064 pasando + 1 salteado** en 37 archivos: `.venv\Scripts\python.exe -m pytest tests/ -q`, ~20 s, sin GPU ni red. Cobertura **100 % con ramas** sobre `src/coach_brain`, con el piso puesto en `fail_under = 100` en `pyproject.toml`; CI no la mide (pytest-cov no está en `requirements-ci.txt`), la sostiene la corrida local `python -m coverage run -m pytest -q && python -m coverage report`. Además `scripts\smoke_test.py --quick` |
 | CI (GitHub Actions) | **Verde** | `.github/workflows/ci.yml`: ruff + la suite completa en un runner Linux sin GPU, con `requirements-ci.txt` + torch del índice CPU. Pusheado el 18/11 a las 12:50 y verde en su primera corrida (`gh run 44307793181`): `All checks passed!` y **1057 passed in 26.21s**, 56 s de punta a punta |
 
 ---
@@ -75,6 +75,37 @@ caracteres) es de **279.000 caracteres por hora**, más bajo que los 345.000 de 
 5.000 caracteres y uno de nota de voz no. A ese ritmo faltan **unas 56 horas**, o sea
 que termina alrededor del **20/11 a la noche**, no a la mañana. El último archivo de la
 lista es `whatsapp_images_chats` con 2,31 M de caracteres: unas 8 horas él solo.
+
+**Se intentó acelerar y no se pudo (2026-11-18, 15:30).** El trabajo se paró a las
+14:29 para medir si decodificar varios chunks a la vez servía. No sirve. Sobre LOS
+MISMOS 4 chunks de un PDF: 2 slots en paralelo, 82,6 s; 1 slot, 82,8 s. **Ganancia
+1,00x.** Dos corridas en serie seguidas difieren 1,17x entre sí, así que el paralelo
+quedó por debajo del ruido. El código del pool quedó en el repo con el default en 1 y
+la medición escrita al lado (`EXTRACT_PARALLEL` en `kb/extract.py`), por si alguna vez
+corre en otra placa.
+
+La razón de que no sirviera es útil: **esta GPU no está limitada por el ancho de
+banda.** Es una RTX 5070 Ti **Laptop** de 12 GB. A ~672 GB/s teóricos, un modelo de
+9 GB debería decodificar a ~74 tok/s; da **19 tok/s, el 26 % del techo**. Bajo carga
+reporta 83 W de 140 máximos, 60 °C, utilización 96 %, **memoria a 9001-11001 MHz de
+14001 soportados y SM a ~1700 MHz de 3090**, y `nvidia-smi -q -d PERFORMANCE` no
+muestra ningún límite activo (ni térmico, ni de potencia, ni de placa, ni de
+software). La máquina está enchufada al 100 % de carga y el plan de energía de
+Windows es `381b4222-f694-41f0-9685-ff5bb260df2e` (**Equilibrado**, no Alto
+rendimiento). Batchear no arregla un clock bajo; subir el clock es lo único que
+queda, y es una opción del sistema que tiene que cambiar Ilan.
+
+**ETA honesto, medido del log de producción y no de un bench:** la corrida anterior
+hizo **19 archivos = 1335 chunks en 16,53 h = 44,6 s/chunk**. Faltan **291 archivos =
+3903 chunks**, o sea **48,3 h**. Esto corrige para arriba los “40 h” que dije antes.
+El cuello son los tokens de salida: ~850 por chunk, 3,3 M en total. El prompt de un
+chunk pesa 2107-2155 tokens medidos (no 1525, como decía antes esta página).
+
+La corrida se relanzó a las **15:30 del 18/11** con `num_ctx` de vuelta en 6144 y
+`OLLAMA_NUM_PARALLEL=1`. `ollama ps` confirma `100% GPU`, 10 GB, contexto 6144. El
+header del log dice **8839** transcripts, no 8835: esta corrida sí incluye el video
+recuperado con `untrunc`, así que para ese archivo no hace falta la segunda pasada
+del gotcha #15.
 
 Que el contador no se mueva por horas **no significa que esté colgado**. Entre las
 09:32 y las 11:45 no salió ningún archivo nuevo y el proceso estaba sano: Ollama
@@ -1088,6 +1119,29 @@ Y conviene dejarlo en una env var, no hardcodeado: el commit disponible depende
 de qué más esté corriendo, así que el número que anduvo hoy puede no andar
 mañana.
 
+### 34. Pasarse de `num_ctx` no falla: descarta prompt y no avisa
+
+Intuición equivocada: si el prompt más la salida se pasan de `num_ctx`, Ollama
+corta con un error. No. **Desplaza la ventana y descarta la parte vieja del
+prompt**, devuelve 200 y un JSON válido, y el chunk sale extraído a medias sin
+que nada lo registre. Es el mismo defecto silencioso que los 32 PDFs que
+extrajeron cero: el pipeline no se cae, se llena de huecos.
+
+Se descubrió queriendo bajar `num_ctx` a 3072 para meter dos slots en la VRAM.
+Medido con `prompt_eval_count` y `eval_count` de `/api/chat` sobre chunks reales,
+el prompt pesa **2107-2155 tokens** y la salida llegó a **892**: un chunk tocó
+**2999 de 3072**. Quedó en 6144.
+
+La lección operativa: el tamaño del prompt **se mide, no se estima**. La
+estimación por caracteres daba 1525 tokens, un 30 % menos que la realidad, y
+sobre ese número el margen parecía cómodo. Y cualquier cambio en `CHUNK_CHARS` o
+en `prompts/extractor.md` obliga a medir de nuevo:
+
+```python
+j = httpx.post(f"{host}/api/chat", json=payload, timeout=900).json()
+print(j["prompt_eval_count"], j["eval_count"])  # suma < num_ctx, con margen
+```
+
 ## Costos reales
 
 | Etapa | Costo |
@@ -1144,7 +1198,7 @@ coach-brain/
 │   ├── escanear_corpus.py    ← pasa ese detector por el corpus vivo; solo lee
 │   ├── reparar_source_path.py    ← reescribe los source_path muertos (gotcha #26)
 │   └── resume, status, watch, transcribe_batches, smoke_test, upload_to_qdrant_cloud
-├── tests/                    ← 1056 tests (+1 salteado) en 37 archivos; `python -m pytest tests/ -q`
+├── tests/                    ← 1064 tests (+1 salteado) en 37 archivos; `python -m pytest tests/ -q`
 ├── logs/                     ← UTF-16 (gotcha #5)
 └── qdrant_storage/           ← 38.343 vectores — IRREMPLAZABLE sin re-correr todo
 ```
@@ -1172,7 +1226,7 @@ caracteres.
 
 Que la lista alcanza se verificó primero sin pushear: un plugin de pytest instala un
 `MetaPathFinder` que levanta `ModuleNotFoundError` para los paquetes que el runner no
-instala, y con eso la suite da **1056 pasando y 1 salteado** —el salteado es local, este
+instala, y con eso la suite da **1064 pasando y 1 salteado** —el salteado es local, este
 Windows no deja crear symlinks sin privilegios, así que en Linux deberían correr los
 1057—. Ningún test se saltea por falta de paquetes.
 
@@ -1200,7 +1254,7 @@ un paquete. La corrida: `gh run view 44307793181`.
    disco externo en lugar de borrarlo, para no perder la opción de re-transcribir.
 4. **Curación manual** — `data/curated/` sigue vacío. La idea era revisar a mano los
    principios extraídos antes de indexar; nunca se hizo. ¿Vale la pena a esta altura?
-5. **Tests** — ya no está vacío: **1056 pasando y 1 salteado** en 37 archivos
+5. **Tests** — ya no está vacío: **1064 pasando y 1 salteado** en 37 archivos
    (`.venv\Scripts\python.exe -m pytest tests/ -q`). Cubren los umbrales del
    verificador, los cuatro motivos de "sin cubrir", el criterio de duplicado, a quién
    manda a re-transcribir la auditoría sin VAD, su detector de alucinaciones con sus
