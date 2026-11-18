@@ -135,6 +135,9 @@ def transcribe_file(
             "pages": None,
             "duration_seconds": info.duration,
             "language_probability": info.language_probability,
+            # Queda anotado porque cambia cuánto se le puede creer al texto:
+            # sin VAD, Whisper alucina sobre música y ruido.
+            "vad_filter": vad,
         },
         "segments": seg_list,
         "full_text": " ".join(full_text_parts),
