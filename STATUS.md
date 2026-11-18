@@ -917,16 +917,27 @@ coach-brain/
    gemelos de cada par. **Sacar uno de los dos borra datos, así que no se tocó.** Si se
    decide sacarlos hay que re-indexar con `--reset` para que el índice deje de
    arrastrarlos.
-7. **Los resultados de la auditoría sin VAD** — están en `data/processed/_novad/`, que
-   no es un directorio que lea ninguna etapa. El detector los separa en `REVISAR` y
-   `DESCARTAR` (`--juzgar`): de los 22 ya re-transcriptos, **7 a revisar y 15 a
-   descartar** (quedan 3 corriendo). Promover uno es copiarlo a
-   `data/processed/transcripts/` y re-indexar con `--reset`, y eso cambia lo que
-   devuelve la búsqueda: **lo decide Ilan después de leer el texto.** Los tres que
-   recuperan texto de verdad son `wa_audio_00032678` (+6.189 caracteres contra la
-   versión con VAD), `wa_audio_00021896` (+3.391 — es el del punto 8) y
-   `wa_audio_00021741` (+1.352, diálogo de campo real); los otros cuatro suman menos de
-   600 caracteres cada uno.
+7. **Los resultados de la auditoría sin VAD** — **la corrida terminó el 18-11: 25 de
+   25.** Están en `data/processed/_novad/`, que no es un directorio que lea ninguna
+   etapa. El detector los separa en `REVISAR` y `DESCARTAR` (`--juzgar`): **10 a revisar
+   y 15 a descartar.** Promover uno es copiarlo a `data/processed/transcripts/` y
+   re-indexar con `--reset`, y eso cambia lo que devuelve la búsqueda: **lo decide Ilan
+   después de leer el texto.** Los cinco que recuperan texto de verdad, en orden:
+
+   | archivo | con VAD | sin VAD | gana |
+   |---|---|---|---|
+   | `wa_audio_00032678` | 256 | 6.445 | +6.189 |
+   | `wa_audio_00029931` (Espacio Libre Primo Levi 2) | 4.213 | 7.813 | +3.600 |
+   | `wa_audio_00021896` | 1.907 | 5.298 | +3.391 (es el del punto 8) |
+   | `wa_audio_00021741` | 227 | 1.579 | +1.352 |
+   | `wa_audio_00037303` | 116 | 683 | +567 |
+
+   Los otros cinco de `REVISAR` suman menos de 300 caracteres cada uno, y dos llevan su
+   propio aviso: `wa_audio_00029933` tiene `"¡vaya que se cae!"` repetido 9 veces
+   cubriendo el 49% del texto, y `wa_audio_00021742` tiene el 37% en frases inventadas.
+   Los 15 de `DESCARTAR` son todos el mismo patrón: `"Gracias por ver el video"`,
+   `"¡Suscríbete al canal!"` o una frase en bucle del decoder — exactamente lo que el
+   gotcha #22 anticipaba que iba a pasar sin el filtro de voz.
 8. **`wa_audio_00021896`, el mismo archivo por los dos lados** — su transcript **vivo**
    son 1.907 caracteres de `"¡Gracias por ver el video!"` repetido 25 veces, el único de
    los 8.838 que junta las dos señales del detector; y su re-transcripción **sin VAD**
