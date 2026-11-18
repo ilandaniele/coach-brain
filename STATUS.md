@@ -240,6 +240,74 @@ pipeline mañana no tiene otra forma de saber cuál es cuál. Hoy aparece uno:
 .venv\Scripts\python.exe -I -X utf8 scripts/verificar.py --sin-audio  # sin ffmpeg, más rápido
 ```
 
+### La auditoría sin VAD
+
+`scripts/retranscribir_sin_vad.py` es la contraparte del gotcha #22: vuelve a
+transcribir **con el filtro de voz apagado** a los archivos que el verificador
+marca como sospechosos, para ver si el VAD se comió habla real. Es una
+auditoría, no una etapa del pipeline.
+
+**Lo que sale de ahí no entra solo al corpus.** Los resultados van a
+`data/processed/_novad/`, que no es un directorio que lea ninguna etapa, y cada
+uno lleva `vad_filter: false` en su `metadata`, así que el verificador los
+lista aparte para siempre (ver "El verificador", punto final). Promover uno es
+copiarlo a mano a `data/processed/transcripts/` y re-indexar, y eso lo decide
+una persona que leyó el texto.
+
+**A quién manda a re-transcribir lo decide el verificador, no una lista.** Los
+umbrales se importan de `scripts/verificar.py` — `MIN_CHARS_POR_MINUTO`,
+`DUR_MINIMA_PARA_JUZGAR`, `SILENCIO_DB` — y hay un test que falla si se
+separan (`test_umbrales_vienen_de_verificar`). La primera versión tenía 14
+nombres escritos a mano, y tres de ellos no matcheaban nunca porque el nombre
+en disco tiene mojibake horneado (U+2560 + U+00FC donde va una "ú"): derivar la
+lista del disco hace que eso no importe. Candidatos reales: **25**.
+
+Son **dos poblaciones distintas**, y confundirlas es el error que hay que no
+cometer:
+
+| Población | Cómo se juzga | Por qué |
+|---|---|---|
+| Transcript con texto | densidad, en fuentes de 30 s o más | Poco texto para mucho audio es el síntoma de que el filtro recortó. |
+| Transcript vacío | volumen medio de la fuente contra `SILENCIO_DB` | 0 caracteres puede ser un video muteado (-91 dB medido) o una falla del filtro. La duración acá no importa. |
+
+Mezclarlas da 33 candidatos, 18 de ellos con 0 caracteres, que es exactamente
+la población que **no** hay que mandar a re-transcribir: sin VAD, sobre
+silencio, Whisper devuelve alucinación. La decisión vive en `clasificar()`,
+separada de la lectura del disco, con 13 tests que fijan sobre todo los casos
+en los que negarse es lo correcto.
+
+**El detector de alucinaciones.** Sin filtro de voz Whisper no devuelve silencio
+cuando no hay habla: devuelve frases de los subtítulos de YouTube con los que se
+entrenó. De los primeros 17 resultados, **13 son basura y 4 pueden ser habla
+real**. Leerlos todos a ojo no escala, así que `parece_alucinacion()` marca con
+tres señales, las tres medidas en este corpus:
+
+1. El texto entero es una de esas frases (`"Gracias por ver el video."`).
+2. Sacando las frases inventadas queda menos de `RESTO_MINIMO = 0.25` del
+   texto, así que no había nada más. El caso bueno conserva el 96 %.
+3. Una secuencia corta de palabras cubre `COBERTURA_PARA_BUCLE = 0.6` o más del
+   texto: el decoder en bucle.
+
+La tercera señal hizo falta porque en bucle Whisper muchas veces no pone
+puntuación. `"La ciudad de Bogotá"` nueve veces seguidas es **una sola frase**
+para cualquier criterio que parta por `.!?`, y así se escapaban cuatro
+resultados obvios. La cobertura del n-grama cuenta **posiciones distintas**, no
+apariciones: multiplicar apariciones por largo sobrecuenta cuando se solapan —
+diez `"o sea"` seguidos ocupan 20 palabras, pero el 4-grama aparece en 7
+posiciones solapadas y multiplicando daría 28 de 40, un 70 % que no existe.
+
+El veredicto solo dice `DESCARTAR` o `REVISAR`; **no existe "promover"**, y hay
+un test que lo fija (`test_veredicto_nunca_promueve_solo`). La calibración
+carga del lado de no marcar habla real: el caso bueno de 6.445 caracteres
+contiene `"Muchas gracias"` quince veces y tiene que seguir pasando. 43 tests
+entre las dos partes.
+
+```powershell
+.venv\Scripts\python.exe -I -X utf8 scripts/retranscribir_sin_vad.py --listar
+.venv\Scripts\python.exe -I -X utf8 scripts/retranscribir_sin_vad.py          # transcribe
+.venv\Scripts\python.exe -I -X utf8 scripts/retranscribir_sin_vad.py --juzgar # informa qué hay
+```
+
 ### Pendiente cuando termine la extracción
 
 1. **Segunda pasada de `kb.extract`** para los transcripts que se crearon
@@ -261,6 +329,10 @@ pipeline mañana no tiene otra forma de saber cuál es cuál. Hoy aparece uno:
 5. **Regenerar el inventario** con `.venv\Scripts\python.exe scripts/manifest.py`
    y confirmar que la lista de `cubierto = NO` quedó solo con lo decidido dejar
    afuera.
+6. **Juzgar la auditoría sin VAD** con
+   `scripts/retranscribir_sin_vad.py --juzgar` y leer uno por uno los que caen en
+   `A REVISAR`. Promover alguno es decisión de Ilan (ver "Decisiones pendientes",
+   punto 7); si se promueve, el `--reset` del paso 3 tiene que correr **después**.
 
 ### Lo que no se puede cerrar
 
@@ -499,6 +571,11 @@ el video", "¡Suscríbete!", "Más información www.cdc.gov.ar", repetidas en
 bucle. De las 11 fuentes audibles con transcript vacío, diez devolvieron
 exactamente eso y se dejaron vacías a propósito. Solo una tenía habla real.
 
+La auditoría a escala la hace `scripts/retranscribir_sin_vad.py`, que deriva
+a quién re-transcribir de los umbrales de `verificar.py`, escribe en un
+directorio de staging que ninguna etapa lee, y marca la alucinación en vez de
+dejar que alguien la lea a ojo. Ver "La auditoría sin VAD".
+
 ### 23. Un archivo renombrado en disco aparece como un hueco del corpus
 
 `scripts/manifest.py` cruzaba fuentes con transcripts por path y por nombre de
@@ -674,9 +751,10 @@ coach-brain/
    disco externo en lugar de borrarlo, para no perder la opción de re-transcribir.
 4. **Curación manual** — `data/curated/` sigue vacío. La idea era revisar a mano los
    principios extraídos antes de indexar; nunca se hizo. ¿Vale la pena a esta altura?
-5. **Tests** — ya no está vacío: **64 tests pasando** (`.venv\Scripts\python.exe -m
+5. **Tests** — ya no está vacío: **107 tests pasando** (`.venv\Scripts\python.exe -m
    pytest tests/ -q`). Cubren los umbrales del verificador, los cuatro motivos de "sin
-   cubrir" y el criterio de duplicado. Lo que **no** hay son tests del pipeline en sí:
+   cubrir", el criterio de duplicado, a quién manda a re-transcribir la auditoría sin
+   VAD y su detector de alucinaciones. Lo que **no** hay son tests del pipeline en sí:
    transcripción, extracción e indexado siguen sin una sola prueba.
 6. **Los 9 grupos de contenido duplicado** — el mismo material entró al pipeline dos
    veces con nombres distintos (4 videos de clase, 3 libros, 2 notas de voz). No falta
@@ -686,8 +764,15 @@ coach-brain/
    gemelos de cada par. **Sacar uno de los dos borra datos, así que no se tocó.** Si se
    decide sacarlos hay que re-indexar con `--reset` para que el índice deje de
    arrastrarlos.
-7. **Bot de WhatsApp** — sigue pendiente. Hoy la entrada es screenshot/texto en la web.
-8. **Fine-tuning** — descartado hasta tener >500 conversaciones etiquetadas.
+7. **Los resultados de la auditoría sin VAD** — están en `data/processed/_novad/`, que
+   no es un directorio que lea ninguna etapa. El detector los separa en `REVISAR` y
+   `DESCARTAR` (`--juzgar`), y de los primeros 17 quedaron 4 para revisar. Promover uno
+   es copiarlo a `data/processed/transcripts/` y re-indexar con `--reset`, y eso cambia
+   lo que devuelve la búsqueda: **lo decide Ilan después de leer el texto.** El
+   candidato fuerte es `wa_audio_00032678` (+6.189 caracteres contra la versión con
+   VAD); el segundo, `wa_audio_00021741` (+1.352, diálogo de campo real).
+8. **Bot de WhatsApp** — sigue pendiente. Hoy la entrada es screenshot/texto en la web.
+9. **Fine-tuning** — descartado hasta tener >500 conversaciones etiquetadas.
 
 ---
 
