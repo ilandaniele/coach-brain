@@ -40,9 +40,9 @@ _NOISE_RE = re.compile(
     r"\d{1,2}:\d{2}(\s*[ap]\.?\s*m\.?)?"          # hora 8:33 / 2:11 a.m.
     r"|\d{1,3}\s*%"                                  # batería 29%
     r"|enviar|enviado|entregado|le[ií]do|visto"
-    r"|escrib[ie].*mensaje"
+    r"|escrib[ieí].*mensaje"
     r"|en l[ií]nea|online|escribiendo\.{0,3}"
-    r"|hoy|ayer|previa|lun|mar|mi[eé]r|jue|vie|s[áa]b|dom"
+    r"|hoy|ayer|previa|lun|mar|mi[eé]r?|jue|vie|s[áa]b|dom"
     r"|[<>«»·∙•|=三▲►◄√x×#@]+"                       # glifos/iconos sueltos
     r")\s*$",
     re.IGNORECASE,
