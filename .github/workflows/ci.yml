@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: requirements-ci.txt
+
+      - name: Preparar el entorno
+        run: uv venv --python 3.12
+
+      # Primero torch de CPU: pyproject.toml fija torch al indice cu130 para la
+      # placa local, y esas ruedas son inutiles (y enormes) en un runner sin GPU.
+      - name: torch (CPU)
+        run: uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Dependencias
+        run: |
+          uv pip install -r requirements-ci.txt
+          uv pip install -e . --no-deps
+
+      - name: Lint
+        run: uvx ruff@latest check src tests scripts
+
+      # PYTHONUTF8: el corpus y los tests estan en castellano con acentos, y el
+      # default de Windows (donde se desarrolla) no es UTF-8.
+      - name: Tests
+        env:
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: utf-8
+        run: .venv/bin/python -m pytest -q
+
+      # scripts/ no tiene tests propios: al menos que no entre nada que no compile.
+      - name: Compilar scripts/
+        run: .venv/bin/python -m compileall -q scripts
