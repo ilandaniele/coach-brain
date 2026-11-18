@@ -32,7 +32,7 @@ Overview y setup en `README.md`. Este archivo es el estado operativo y los gotch
 | Qdrant | OK (local embebido) | persiste en `./qdrant_storage/` |
 | Material del coach | OK | **`C:\Users\Ilan\Desktop\Ilan\Seduccion`** (360GB) — las tres junctions de `data/raw` apuntan ahi y resuelven bien; ver gotcha #7 |
 | Deploy Fly.io | OK | app `coach-brain-ilan`, región `iad`, 4GB / 2 vCPU shared, siempre prendida |
-| Tests | OK | **948 pasando + 1 salteado** en 34 archivos: `.venv\Scripts\python.exe -m pytest tests/ -q`, ~35 s, sin GPU ni red. Cobertura 87 % sobre `src/coach_brain`. Además `scripts\smoke_test.py --quick` |
+| Tests | OK | **1000 pasando + 1 salteado** en 35 archivos: `.venv\Scripts\python.exe -m pytest tests/ -q`, ~40 s, sin GPU ni red. Cobertura 99 % sobre `src/coach_brain`. Además `scripts\smoke_test.py --quick` |
 
 ---
 
@@ -910,7 +910,7 @@ coach-brain/
 │   ├── escanear_corpus.py    ← pasa ese detector por el corpus vivo; solo lee
 │   ├── reparar_source_path.py    ← reescribe los source_path muertos (gotcha #26)
 │   └── resume, status, watch, transcribe_batches, smoke_test, upload_to_qdrant_cloud
-├── tests/                    ← 948 tests (+1 salteado) en 34 archivos; `python -m pytest tests/ -q`
+├── tests/                    ← 1000 tests (+1 salteado) en 35 archivos; `python -m pytest tests/ -q`
 ├── logs/                     ← UTF-16 (gotcha #5)
 └── qdrant_storage/           ← 38.343 vectores — IRREMPLAZABLE sin re-correr todo
 ```
@@ -929,7 +929,7 @@ coach-brain/
    disco externo en lugar de borrarlo, para no perder la opción de re-transcribir.
 4. **Curación manual** — `data/curated/` sigue vacío. La idea era revisar a mano los
    principios extraídos antes de indexar; nunca se hizo. ¿Vale la pena a esta altura?
-5. **Tests** — ya no está vacío: **948 pasando y 1 salteado** en 34 archivos
+5. **Tests** — ya no está vacío: **1000 pasando y 1 salteado** en 35 archivos
    (`.venv\Scripts\python.exe -m pytest tests/ -q`). Cubren los umbrales del
    verificador, los cuatro motivos de "sin cubrir", el criterio de duplicado, a quién
    manda a re-transcribir la auditoría sin VAD, su detector de alucinaciones con sus
@@ -982,18 +982,37 @@ coach-brain/
    (`app/pwa.py`), donde el riesgo no es que falle sino que **no** falle: un
    `__ICON192__` sin reemplazar deja un manifest inválido que el navegador se traga sin
    decir nada y la app deja de ser instalable, así que la prueba central es negativa.
-   Y la interfaz (`app/streamlit_app.py`, 944 líneas), que no se puede importar porque
-   abajo del marcador `# ============ UI ===` corre `warmup()`: la fixture compila solo
-   la mitad de arriba. Ahí lo crítico es la cookie firmada —la app está publicada y lo
-   único que la separa de cualquiera es el PIN— y el throttling: el `exp` va dentro del
-   HMAC, así que estirar la cookie la invalida; cambiar el PIN invalida las sesiones
-   viejas; del quinto fallo en adelante la espera duplica 30/60/120/240 s con techo de
-   15 minutos; y la IP sale del **primero** del `X-Forwarded-For`, porque el resto de la
-   cadena lo pone el cliente.
+   Y la interfaz (`app/streamlit_app.py`, 945 líneas), que se prueba en dos archivos
+   porque son dos problemas distintos. `tests/test_streamlit_app.py` cubre la mitad de
+   arriba del marcador `# ============ UI ===`: el archivo no se puede importar, porque
+   abajo del marcador corre `warmup()`, así que la fixture compila solo esa mitad. Ahí
+   lo crítico es la cookie firmada —la app está publicada y lo único que la separa de
+   cualquiera es el PIN— y el throttling: el `exp` va dentro del HMAC, así que estirar
+   la cookie la invalida; cambiar el PIN invalida las sesiones viejas; del quinto fallo
+   en adelante la espera duplica 30/60/120/240 s con techo de 15 minutos; y la IP sale
+   del **primero** del `X-Forwarded-For`, porque el resto de la cadena lo pone el
+   cliente.
 
-   De `ingest/transcribe.py` solo está cubierto el camino sin audio y la anotación de
-   `vad_filter`: transcribir de verdad necesita GPU y un archivo de audio, así que eso
-   no se prueba en la suite. Fuera de eso ya no queda módulo sin pruebas.
+   `tests/test_streamlit_ui.py` cubre lo de abajo del marcador, que es el cuerpo de la
+   UI, con `streamlit.testing.v1.AppTest`: corre el script entero en un thread de este
+   mismo proceso y expone los elementos que dibujó, así que se puede subir una captura,
+   apretar botones y leer lo que salió. Lo caro se reemplaza en el **módulo de origen**
+   (`kb.retrieve`, `kb.memory`, `llm`, `kb.embed`, `kb.index`, más `rapidocr_onnxruntime`
+   y `anthropic`), porque la app hace `from ... import nombre` y vuelve a resolver esos
+   nombres en cada rerun. Eso deja probado lo que el usuario toca: el panel de modelos
+   (sin ningún backend configurado la app corta con un aviso, y los gratis van antes que
+   los pagos porque el primero es el default), el flujo del Tab 1 de punta a punta —la
+   captura leída por OCR o por el modelo de visión, el texto pegado, el RAG, la memoria
+   por contacto, el prompt que se arma—, la degradación (Qdrant caído o el proveedor sin
+   cuota avisan y la consulta sigue, en vez de dejar la pantalla en blanco) y las notas
+   del Tab 3, que es el único lugar donde la app escribe a disco. La primera corrida
+   tarda ~1,2 s y cada rerun 0,03 s, así que el archivo entero cuesta ~30 s.
+
+   De lo que queda sin cubrir, 16 de las 18 líneas son `if __name__ == "__main__":` y su
+   cuerpo: son puntos de entrada, no lógica. Las otras dos son el `except ValueError` de
+   `ingest/whatsapp_images_ocr.py`, que guarda el nombre del archivo cuando el path no es
+   relativo a `data/raw`; es defensivo y llegar ahí pide armar un árbol irreal. Fuera de
+   eso ya no queda módulo sin pruebas.
 6. **Los 9 grupos de contenido duplicado** — el mismo material entró al pipeline dos
    veces con nombres distintos (4 videos de clase, 3 libros, 2 notas de voz). No falta
    nada: sobra texto repetido en el corpus y en el índice, y eso sesga la búsqueda porque
