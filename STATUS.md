@@ -866,7 +866,7 @@ coach-brain/
 │   ├── escanear_corpus.py    ← pasa ese detector por el corpus vivo; solo lee
 │   ├── reparar_source_path.py    ← reescribe los source_path muertos (gotcha #26)
 │   └── resume, status, watch, transcribe_batches, smoke_test, upload_to_qdrant_cloud
-├── tests/                    ← 142 tests en 13 archivos; `python -m pytest tests/ -q`
+├── tests/                    ← 173 tests en 15 archivos; `python -m pytest tests/ -q`
 ├── logs/                     ← UTF-16 (gotcha #5)
 └── qdrant_storage/           ← 38.343 vectores — IRREMPLAZABLE sin re-correr todo
 ```
@@ -885,13 +885,20 @@ coach-brain/
    disco externo en lugar de borrarlo, para no perder la opción de re-transcribir.
 4. **Curación manual** — `data/curated/` sigue vacío. La idea era revisar a mano los
    principios extraídos antes de indexar; nunca se hizo. ¿Vale la pena a esta altura?
-5. **Tests** — ya no está vacío: **142 tests pasando** en 13 archivos
+5. **Tests** — ya no está vacío: **173 tests pasando** en 15 archivos
    (`.venv\Scripts\python.exe -m pytest tests/ -q`). Cubren los umbrales del
    verificador, los cuatro motivos de "sin cubrir", el criterio de duplicado, a quién
    manda a re-transcribir la auditoría sin VAD, su detector de alucinaciones con sus
    avisos, el piso que protege a `INVENTARIO.md` de un recorrido fallido y el escaneo
-   del corpus vivo. Lo que **no** hay son tests del pipeline en sí: transcripción,
-   extracción e indexado siguen sin una sola prueba.
+   del corpus vivo. Desde el 18-11 también las dos etapas que deciden qué llega al
+   índice: que el chunking reparta el texto sin perder un carácter, que
+   `_extract_json()` recupere las respuestas sucias del modelo (fences, prosa
+   alrededor, coma colgante, cortadas por `max_tokens`), que el salteo resumible sea
+   por **existencia** del archivo y no por contenido (gotcha #13) y que una extracción
+   con 0 items no escriba un solo punto en Qdrant — la frase de la que depende el
+   informe del paso 6. Corren con un doble en lugar de Ollama y de Qdrant, así que no
+   piden GPU ni abren el índice. Lo que sigue **sin una sola prueba** es la
+   transcripción: necesita GPU y un archivo de audio de verdad.
 6. **Los 9 grupos de contenido duplicado** — el mismo material entró al pipeline dos
    veces con nombres distintos (4 videos de clase, 3 libros, 2 notas de voz). No falta
    nada: sobra texto repetido en el corpus y en el índice, y eso sesga la búsqueda porque
@@ -902,18 +909,24 @@ coach-brain/
    arrastrarlos.
 7. **Los resultados de la auditoría sin VAD** — están en `data/processed/_novad/`, que
    no es un directorio que lea ninguna etapa. El detector los separa en `REVISAR` y
-   `DESCARTAR` (`--juzgar`), y de los primeros 17 quedaron 4 para revisar. Promover uno
-   es copiarlo a `data/processed/transcripts/` y re-indexar con `--reset`, y eso cambia
-   lo que devuelve la búsqueda: **lo decide Ilan después de leer el texto.** El
-   candidato fuerte es `wa_audio_00032678` (+6.189 caracteres contra la versión con
-   VAD); el segundo, `wa_audio_00021741` (+1.352, diálogo de campo real).
-8. **`wa_audio_00021896` en el corpus vivo** — 1.907 caracteres de `"¡Gracias por
-   ver el video!"` repetido 25 veces, el único de los 8.838 que junta las dos señales
-   del detector. **Hoy no está en el índice**: su extracción se movió a `_reextraer/`
-   y la corrida con Ollama todavía no llegó. Si cuando llegue saca items, hay algo que
-   decidir y el paso 6 de `finalize.ps1` lo va a imprimir como `HAY QUE DECIDIR`; si
-   saca 0, el extractor ya lo filtró y no hay nada que hacer. Sacar un transcript del
-   corpus lo decide Ilan.
+   `DESCARTAR` (`--juzgar`): de los 22 ya re-transcriptos, **7 a revisar y 15 a
+   descartar** (quedan 3 corriendo). Promover uno es copiarlo a
+   `data/processed/transcripts/` y re-indexar con `--reset`, y eso cambia lo que
+   devuelve la búsqueda: **lo decide Ilan después de leer el texto.** Los tres que
+   recuperan texto de verdad son `wa_audio_00032678` (+6.189 caracteres contra la
+   versión con VAD), `wa_audio_00021896` (+3.391 — es el del punto 8) y
+   `wa_audio_00021741` (+1.352, diálogo de campo real); los otros cuatro suman menos de
+   600 caracteres cada uno.
+8. **`wa_audio_00021896`, el mismo archivo por los dos lados** — su transcript **vivo**
+   son 1.907 caracteres de `"¡Gracias por ver el video!"` repetido 25 veces, el único de
+   los 8.838 que junta las dos señales del detector; y su re-transcripción **sin VAD**
+   son 5.298 caracteres de diálogo de campo real, sin una sola marca ni aviso. O sea que
+   las dos decisiones son una sola: lo que está en el corpus es basura, y el reemplazo ya
+   está transcripto, medido y esperando en `_novad/`. **Hoy no aporta nada al índice**:
+   su extracción se movió a `_reextraer/` y la corrida con Ollama todavía no llegó, así
+   que el paso 6 de `finalize.ps1` lo imprime como `sin extraer`. Si cuando llegue saca
+   items, los va a sacar del texto alucinado. Promover la versión sin VAD y re-indexar
+   lo decide Ilan.
 9. **Bot de WhatsApp** — sigue pendiente. Hoy la entrada es screenshot/texto en la web.
 10. **Fine-tuning** — descartado hasta tener >500 conversaciones etiquetadas.
 
