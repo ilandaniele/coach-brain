@@ -32,7 +32,7 @@ Overview y setup en `README.md`. Este archivo es el estado operativo y los gotch
 | Qdrant | OK (local embebido) | persiste en `./qdrant_storage/` |
 | Material del coach | OK | **`C:\Users\Ilan\Desktop\Ilan\Seduccion`** (360GB) — las tres junctions de `data/raw` apuntan ahi y resuelven bien; ver gotcha #7 |
 | Deploy Fly.io | OK | app `coach-brain-ilan`, región `iad`, 4GB / 2 vCPU shared, siempre prendida |
-| Tests | OK | **1025 pasando + 1 salteado** en 36 archivos: `.venv\Scripts\python.exe -m pytest tests/ -q`, ~20 s, sin GPU ni red. Cobertura 99 % sobre `src/coach_brain`. Además `scripts\smoke_test.py --quick` |
+| Tests | OK | **1041 pasando + 1 salteado** en 37 archivos: `.venv\Scripts\python.exe -m pytest tests/ -q`, ~20 s, sin GPU ni red. Cobertura 99 % sobre `src/coach_brain`. Además `scripts\smoke_test.py --quick` |
 | CI (GitHub Actions) | Escrito, sin pushear | `.github/workflows/ci.yml`: ruff + la suite completa en un runner Linux sin GPU, con `requirements-ci.txt` + torch del índice CPU. Verificado localmente simulando el runner; falta `git push` (ver más abajo) |
 
 ---
@@ -544,7 +544,15 @@ También `coach <subcomando>` (typer, `src/coach_brain/cli.py`): `ingest-pdfs`, 
   entre tandas, no traba la máquina).
 - **`scripts\finalize.ps1`** — agrega imágenes-chat, extrae con Ollama, re-indexa con
   `--reset`, abre Streamlit. **Ojo: el `--reset` destruye el índice actual.** No correr con
-  batches activos.
+  batches activos. Para liberar el lock de Qdrant cierra los Streamlit abiertos, y el
+  filtro de eso estaba roto: era `$_.ProcessId -ne $PID`, pero `$PID` es el del PowerShell
+  y nunca coincide con un `python.exe`, así que no filtraba nada y se llevaba cualquier
+  python de la máquina, de este proyecto o de otro. Desde `6cb1ddd` mata sólo los que
+  tienen `streamlit` en la línea de comando; si otra cosa tiene el lock, el paso 7 falla
+  con el error de Qdrant a la vista en vez de perder trabajo ajeno en silencio.
+  `tests\test_finalize_ps1.py` fija el orden de los nueve pasos, las dos guardas (el abort
+  con un proceso del pipeline vivo y la confirmación del `--reset`) y ese filtro: es
+  PowerShell, no se puede ejercitar desde pytest, así que los tests leen el texto.
 - **`scripts\upload_to_qdrant_cloud.py`** — migra los vectores del Qdrant embebido a Qdrant
   Cloud (alternativa a hornearlos en la imagen; hoy no se usa). Leía
   `settings.qdrant_storage`, que devuelve `Path("")` —el directorio actual— justo cuando
@@ -932,7 +940,7 @@ coach-brain/
 │   ├── escanear_corpus.py    ← pasa ese detector por el corpus vivo; solo lee
 │   ├── reparar_source_path.py    ← reescribe los source_path muertos (gotcha #26)
 │   └── resume, status, watch, transcribe_batches, smoke_test, upload_to_qdrant_cloud
-├── tests/                    ← 1025 tests (+1 salteado) en 36 archivos; `python -m pytest tests/ -q`
+├── tests/                    ← 1041 tests (+1 salteado) en 37 archivos; `python -m pytest tests/ -q`
 ├── logs/                     ← UTF-16 (gotcha #5)
 └── qdrant_storage/           ← 38.343 vectores — IRREMPLAZABLE sin re-correr todo
 ```
@@ -960,9 +968,9 @@ caracteres.
 
 Que la lista alcanza se verificó sin pushear: un plugin de pytest instala un
 `MetaPathFinder` que levanta `ModuleNotFoundError` para los paquetes que el runner no
-instala, y con eso la suite da **1025 pasando y 1 salteado** —el salteado es local, este
+instala, y con eso la suite da **1041 pasando y 1 salteado** —el salteado es local, este
 Windows no deja crear symlinks sin privilegios, así que en Linux deberían correr los
-1026—. Ningún test se saltea por falta de paquetes.
+1042—. Ningún test se saltea por falta de paquetes.
 
 Falta un paso, y es de Ilan: **`git push`**. El workflow está commiteado desde `1446b9b`
 pero nunca se subió, así que GitHub todavía no lo ejecutó. Hasta que no se pushee, lo de
@@ -982,7 +990,7 @@ arriba es una simulación local, no una corrida verde de verdad.
    disco externo en lugar de borrarlo, para no perder la opción de re-transcribir.
 4. **Curación manual** — `data/curated/` sigue vacío. La idea era revisar a mano los
    principios extraídos antes de indexar; nunca se hizo. ¿Vale la pena a esta altura?
-5. **Tests** — ya no está vacío: **1025 pasando y 1 salteado** en 36 archivos
+5. **Tests** — ya no está vacío: **1041 pasando y 1 salteado** en 37 archivos
    (`.venv\Scripts\python.exe -m pytest tests/ -q`). Cubren los umbrales del
    verificador, los cuatro motivos de "sin cubrir", el criterio de duplicado, a quién
    manda a re-transcribir la auditoría sin VAD, su detector de alucinaciones con sus

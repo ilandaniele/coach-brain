@@ -69,9 +69,17 @@ if ($pipeline.Count -gt 0) {
     Write-Host "Esperalos o paralos a mano. Este script no los mata: perderias el avance." -ForegroundColor Red
     exit 1
 }
-$otros = @($procs | Where-Object { $_.ProcessId -ne $PID })
+#     Y se matan SOLO los que son Streamlit. Antes se mataba todo python.exe
+#     que no fuera este proceso, pero este proceso es powershell.exe, asi que
+#     $PID nunca coincide con un python y el filtro no filtraba nada: se iba
+#     abajo cualquier python de la maquina, de este proyecto o de otro. Si algo
+#     que no es Streamlit tiene el lock, mejor que el paso 7 falle con el error
+#     de Qdrant a la vista que perder trabajo ajeno en silencio.
+$otros = @($procs | Where-Object {
+    $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine -match "streamlit"
+})
 if ($otros.Count -gt 0) {
-    Write-Host "Cerrando $($otros.Count) proceso(s) python (Streamlit) para liberar el lock de Qdrant..." -ForegroundColor Yellow
+    Write-Host "Cerrando $($otros.Count) proceso(s) de Streamlit para liberar el lock de Qdrant..." -ForegroundColor Yellow
     foreach ($p in $otros) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
     Start-Sleep -Seconds 2
 }
