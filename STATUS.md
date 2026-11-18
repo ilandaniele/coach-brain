@@ -32,7 +32,7 @@ Overview y setup en `README.md`. Este archivo es el estado operativo y los gotch
 | Qdrant | OK (local embebido) | persiste en `./qdrant_storage/` |
 | Material del coach | OK | **`C:\Users\Ilan\Desktop\Ilan\Seduccion`** (360GB) — las tres junctions de `data/raw` apuntan ahi y resuelven bien; ver gotcha #7 |
 | Deploy Fly.io | OK | app `coach-brain-ilan`, región `iad`, 4GB / 2 vCPU shared, siempre prendida |
-| Tests | OK | **867 pasando + 1 salteado** en 33 archivos: `.venv\Scripts\python.exe -m pytest tests/ -q`, ~35 s, sin GPU ni red. Cobertura 82 % sobre `src/coach_brain`. Además `scripts\smoke_test.py --quick` |
+| Tests | OK | **948 pasando + 1 salteado** en 34 archivos: `.venv\Scripts\python.exe -m pytest tests/ -q`, ~35 s, sin GPU ni red. Cobertura 87 % sobre `src/coach_brain`. Además `scripts\smoke_test.py --quick` |
 
 ---
 
@@ -910,7 +910,7 @@ coach-brain/
 │   ├── escanear_corpus.py    ← pasa ese detector por el corpus vivo; solo lee
 │   ├── reparar_source_path.py    ← reescribe los source_path muertos (gotcha #26)
 │   └── resume, status, watch, transcribe_batches, smoke_test, upload_to_qdrant_cloud
-├── tests/                    ← 867 tests (+1 salteado) en 33 archivos; `python -m pytest tests/ -q`
+├── tests/                    ← 948 tests (+1 salteado) en 34 archivos; `python -m pytest tests/ -q`
 ├── logs/                     ← UTF-16 (gotcha #5)
 └── qdrant_storage/           ← 38.343 vectores — IRREMPLAZABLE sin re-correr todo
 ```
@@ -929,7 +929,7 @@ coach-brain/
    disco externo en lugar de borrarlo, para no perder la opción de re-transcribir.
 4. **Curación manual** — `data/curated/` sigue vacío. La idea era revisar a mano los
    principios extraídos antes de indexar; nunca se hizo. ¿Vale la pena a esta altura?
-5. **Tests** — ya no está vacío: **867 pasando y 1 salteado** en 33 archivos
+5. **Tests** — ya no está vacío: **948 pasando y 1 salteado** en 34 archivos
    (`.venv\Scripts\python.exe -m pytest tests/ -q`). Cubren los umbrales del
    verificador, los cuatro motivos de "sin cubrir", el criterio de duplicado, a quién
    manda a re-transcribir la auditoría sin VAD, su detector de alucinaciones con sus
