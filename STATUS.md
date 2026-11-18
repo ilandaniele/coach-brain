@@ -226,6 +226,10 @@ encuentra algo sospechoso, así que sirve de gate. Revisa:
    las que vienen de un transcript de 1.500 caracteres o más, que son las que
    no deberían estar vacías.
 6. Extracciones cuyo transcript ya no existe.
+7. Resultados de la auditoría sin VAD esperando en `data/processed/_novad/`
+   sin que nadie los haya juzgado. **No cuenta como sospechoso**: el verificador
+   devuelve 1 cuando hay sospechosos y `finalize.ps1` lo usa de gate, y trabajo
+   pendiente de que lo lea una persona no es un hueco del corpus.
 
 Además lista aparte, **sin contarlos como sospechosos**, los transcripts hechos
 sin VAD (`metadata.vad_filter == false`). No son un hueco: el flag se usa a
