@@ -24,8 +24,8 @@ regenera cuando quieras con:
 
 ## Antes de borrar nada
 
-Hay tres cosas pendientes que todavía necesitan el material crudo. Hasta que
-las tres estén hechas y verificadas, no conviene borrar.
+Hay cuatro cosas pendientes que todavía necesitan el material crudo. Hasta que
+las cuatro estén hechas y verificadas, no conviene borrar.
 
 1. **La extracción que está corriendo ahora.** Está re-destilando 301
    fuentes cuya extracción salió vacía porque Anthropic se quedó sin crédito
@@ -53,6 +53,31 @@ las tres estén hechas y verificadas, no conviene borrar.
    páginas, `engine=rapidocr`, 26 minutos de CPU. La separación de palabras en
    la tapa quedó imperfecta ("Lossecretos"), pero el cuerpo del texto está
    bien.
+
+4. **Lo que estaba escondido y se rescató el 17/11.** Tres archivos figuraban
+   como cubiertos sin estarlo de verdad, y los tres necesitaron el original
+   para arreglarse. Ya está hecho, pero vale saber qué tipo de hueco fue,
+   porque es el que no se ve:
+   - `data/raw/whatsapp/00025319-cliente ideal, canva,.zip`. El inventario
+     descartaba en silencio cualquier extensión que no estuviera en
+     `MEDIA_EXT`, así que el zip no aparecía en ninguna parte. Adentro había
+     `cliente ideal 1.2.pptx` y `canvas 1.3.pdf`, los dos con el canvas de
+     negocio del coach. Se extrajo a
+     `data/raw/whatsapp/00025319-cliente ideal canva/` y los dos entraron al
+     pipeline. El inventario ahora lista los formatos que no clasifica, así
+     que un caso así vuelve a ser visible.
+   - `canvas 1.3.pdf`. Una exportación de Canva: traía 510 caracteres de capa
+     de texto en 2 páginas y todo el contenido en la imagen. Con OCR pasó a
+     3.506 caracteres, y lo que faltaba era el canvas entero (segmentos de
+     clientes, dolores, propuesta única de valor).
+   - `El Arte Del Buen Sexo by Academia Para Caballeros (z-lib.org).pdf`. Un
+     libro escaneado de 132 páginas que estaba registrado con 796 caracteres
+     en total. El OCR no lo alcanzaba porque solo se disparaba con cero texto
+     extraído.
+
+   Lo que quedó afuera a propósito, por si aparece en el inventario: dos
+   `.vcf` (tarjetas de contacto de WhatsApp) y un `Diagrama sin título.drawio`
+   de 15 KB que trae el mismo diagrama que ya está en el `.pptx`.
 
 ## Qué se pierde para siempre si borrás el material crudo
 

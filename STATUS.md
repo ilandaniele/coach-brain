@@ -85,6 +85,9 @@ corriendo es la re-destilación, que es larga pero mecánica.
 | `Método TED para hablar en público`, un PDF escaneado sin texto extraíble | Cerrado. Tercera pasada de OCR en `ingest/pdfs.py`: rasteriza cada página con pymupdf y le aplica RapidOCR, detrás del flag `--ocr`. Salieron 141.340 caracteres en 59 páginas, `engine=rapidocr`, 26 minutos de CPU |
 | 8 PDFs sueltos y `Preguntas cita.docx` en la raíz de `Seduccion` | Cerrado, tienen transcript |
 | Las 25 capturas figuraban como "sin cubrir" en el inventario aun después del OCR | Era un bug de `scripts/manifest.py`: `_out_name` les pone un sufijo `__<hash8>` a las imágenes de fuera de `data/raw/whatsapp`, y `ocr_coverage()` matcheaba por stem exacto. Corregido: ahora registra las dos formas |
+| Un `.zip` adjunto en WhatsApp con material del coach adentro, invisible para el inventario | Cerrado. `scripts/manifest.py` descartaba en silencio toda extensión fuera de `MEDIA_EXT`; ahora las censa y las reporta (gotcha #20). El zip traía `cliente ideal 1.2.pptx` y `canvas 1.3.pdf`, los dos ingestados |
+| Los `.pptx` no se leían en ninguna etapa | Cerrado. `ingest/docs.py` lee `.pptx` con el stdlib (zip de XML), una línea por párrafo y las notas del orador pegadas a su diapositiva, resueltas por el `.rels` y no por el número de archivo. Además la etapa ahora recorre `data/raw/whatsapp`, que nunca había mirado |
+| PDFs con capa de texto casi vacía que pasaban como cubiertos sin llegar al OCR | Cerrado. El gate de `ingest/pdfs.py` era `if not segments and ocr`; ahora rasteriza también cuando el texto es pobre para la cantidad de páginas (gotcha #19). `canvas 1.3.pdf` pasó de 510 a 3.506 caracteres, y el libro escaneado `El Arte Del Buen Sexo` (132 páginas) estaba registrado con 796 caracteres en total |
 
 ### Lo que sigue corriendo
 
@@ -120,10 +123,16 @@ legítimas: mediana 258 caracteres, notas de voz sin nada que destilar.
 
 ### Pendiente cuando termine la extracción
 
-1. **Segunda pasada de `kb.extract`** para `Método TED`. Su transcript se
-   escribió a las 22:10:10 y la corrida había armado su lista de archivos a las
-   21:57, así que esta corrida no lo ve (`transcripts = sorted(glob("*.json"))`
-   una sola vez al arrancar). Son unos 31 chunks.
+1. **Segunda pasada de `kb.extract`** para los transcripts que se crearon
+   después de que la corrida armara su lista de archivos, que por eso no entran
+   en ella (`transcripts = sorted(glob("*.json"))` corre una sola vez al
+   arrancar, gotcha #15). Ninguno tiene todavía un `.extracted.json`, así que
+   basta con volver a correr la etapa, sin borrar nada:
+   - `Método TED para hablar en público` (~31 chunks)
+   - `pptx_cliente ideal 1.2` (1.665 caracteres)
+   - `pdf_canvas 1.3` (3.506 caracteres, `engine=texto+rapidocr`)
+   - `pdf_El Arte Del Buen Sexo by Academia Para Caballeros (z-lib.org)`, el
+     libro de 132 páginas rescatado con OCR
 2. **Verificar** que no quedaron extracciones vacías que no deberían estarlo.
 3. **Re-indexar** con `python -m coach_brain.kb.index --reset`. Destructivo:
    borra y reconstruye las 3 colecciones. El backup del índice que funciona hoy
@@ -324,6 +333,14 @@ El clasificador de permisos lo rechaza con `Reason: [Undermining Oversight]`, co
 
 ### 18. El OCR de imágenes fuera de `data/raw/whatsapp` lleva sufijo de hash
 `_out_name` en `ingest/whatsapp_images_ocr.py` le agrega `__<hash8>` al nombre de salida de las imágenes que vienen de otros roots, para evitar colisiones de nombre. Cualquier cosa que cruce cobertura contra esos archivos tiene que contemplar las dos formas del nombre. `scripts/manifest.py` lo hacía mal y quedaba reportando 25 capturas como "sin cubrir" después de haberles pasado OCR.
+
+### 19. Un PDF con capa de texto casi vacía pasaba como "cubierto"
+`ingest/pdfs.py` solo rasterizaba cuando la extracción devolvía **cero** segmentos. Un PDF que trae unas pocas líneas de texto y el resto en imágenes quedaba registrado como cubierto y nunca llegaba al OCR. Dos casos reales: `canvas 1.3.pdf`, una exportación de Canva, con 510 caracteres en 2 páginas (el canvas de negocio del coach estaba todo en la imagen), y `El Arte Del Buen Sexo`, un libro escaneado de 132 páginas registrado con 796 caracteres en total. Ahora el gate es `OCR_MIN_CHARS_PER_PAGE = 400`: si el texto extraído es pobre para la cantidad de páginas, también rasteriza, y se queda página por página con el resultado más largo. El motor queda anotado como `texto+rapidocr` en el metadata del transcript cuando se mezclaron las dos fuentes.
+
+Para encontrar más casos así, el criterio es `len(full_text) / pages`: un PDF de texto real ronda los 1500-3000 caracteres por página.
+
+### 20. Material real escondido dentro de un `.zip`
+`scripts/manifest.py` descartaba en silencio cualquier extensión que no estuviera en `MEDIA_EXT` (`if ext not in MEDIA_EXT: continue`), así que un formato que el pipeline no maneja no aparecía en ninguna parte del inventario: parecía no existir. Había un `.zip` adjunto en WhatsApp con un `.pptx` y un `.pdf` adentro, los dos con contenido del coach. Ahora el inventario tiene una sección "Formatos que el inventario no clasifica" que cuenta y ejemplifica todo lo descartado. Lo que quedó afuera a propósito: dos `.vcf` (tarjetas de contacto) y un `.drawio` de 15 KB con el mismo diagrama que ya está en el `.pptx`.
 
 ---
 

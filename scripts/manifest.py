@@ -101,9 +101,17 @@ def load_transcripts():
 
 
 def scan_disk():
-    """Recorre el material crudo una sola vez, deduplicando por realpath."""
+    """Recorre el material crudo una sola vez, deduplicando por realpath.
+
+    Devuelve (fuentes, ignorados). `ignorados` lleva la cuenta de las
+    extensiones que no estan en MEDIA_EXT. Sin eso, un formato que el
+    pipeline no maneja no aparece en ninguna parte del inventario y parece
+    que no existe: fue exactamente lo que paso con un .zip que traia un
+    .pptx y un .pdf adentro.
+    """
     seen_dirs = set()
     out = {}
+    ignorados = {}
     for dirpath, dirnames, filenames in os.walk(RAW):
         rp = real(Path(dirpath))
         if rp in seen_dirs:
@@ -114,6 +122,14 @@ def scan_disk():
             p = Path(dirpath) / fn
             ext = p.suffix.lower()
             if ext not in MEDIA_EXT:
+                rec = ignorados.setdefault(ext, {"n": 0, "bytes": 0, "ej": []})
+                try:
+                    rec["bytes"] += p.stat().st_size
+                except OSError:
+                    pass
+                rec["n"] += 1
+                if len(rec["ej"]) < 3:
+                    rec["ej"].append(str(p))
                 continue
             k = real(p)
             if k in out:
@@ -123,7 +139,7 @@ def scan_disk():
             except OSError:
                 size = -1
             out[k] = {"path": str(p), "ext": ext, "kind": kind(ext), "size": size}
-    return out
+    return out, ignorados
 
 
 def ocr_coverage():
@@ -158,7 +174,7 @@ def main() -> None:
           % (len(by_src), pend, len(huerfanos)))
 
     print("Recorriendo material crudo (son cientos de GB, puede tardar)...")
-    disk = scan_disk()
+    disk, ignorados = scan_disk()
     print("  %d archivos fuente en disco" % len(disk))
 
     ocr = ocr_coverage()
@@ -268,6 +284,25 @@ def main() -> None:
         L.append("%d archivos devolvieron 0 principios, 0 situaciones y 0 frases." % len(vacios))
         L.append("En audios cortos eso suele ser legitimo. Re-extraer no necesita el")
         L.append("archivo original, solo el transcript.")
+    else:
+        L.append("Ninguno.")
+    L.append("")
+    L.append("## Formatos que el inventario no clasifica")
+    L.append("")
+    L.append("El recorrido solo cuenta las extensiones de MEDIA_EXT. Lo que sigue")
+    L.append("quedo afuera: puede ser basura, o puede ser material real en un formato")
+    L.append("que el pipeline todavia no lee. Conviene revisarlo antes de borrar nada.")
+    L.append("")
+    if ignorados:
+        tot_n = sum(v["n"] for v in ignorados.values())
+        tot_b = sum(v["bytes"] for v in ignorados.values())
+        L.append("**%d archivos, %s**" % (tot_n, gb(tot_b)))
+        L.append("")
+        L.append("| Extension | Archivos | Tamano | Ejemplo |")
+        L.append("|---|---|---|---|")
+        for ext, v in sorted(ignorados.items(), key=lambda kv: -kv[1]["bytes"]):
+            ej = v["ej"][0] if v["ej"] else ""
+            L.append("| `%s` | %d | %s | `%s` |" % (ext or "(sin extension)", v["n"], gb(v["bytes"]), ej))
     else:
         L.append("Ninguno.")
     L.append("")
