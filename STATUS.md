@@ -2,7 +2,7 @@
 
 > Documento de handoff. Si arrancás una sesión Claude nueva, leé esto primero antes de avanzar.
 
-**Última actualización:** 2026-11-17 22:30
+**Última actualización:** 2026-11-18 (tarde)
 **Estado general:** Pipeline de ingesta **terminado** y app **desplegada en Fly.io**. El índice que está sirviendo hoy tiene 38.343 vectores y no incluye los libros más grandes. Los huecos de aguas arriba (PDFs que llegaron por WhatsApp, capturas sin OCR, el PDF escaneado) ya están **cerrados en código y en disco**. Lo que queda corriendo es la re-destilación de 301 fuentes con Ollama local: **unas 50 horas más** al 18/11 a las 02:05, re-medido sobre 4 horas de corrida real (310 chunks, 47,6 s cada uno). Ver [Huecos del corpus](#huecos-del-corpus-en-curso-2026-11-17).
 
 ---
@@ -32,7 +32,7 @@ Overview y setup en `README.md`. Este archivo es el estado operativo y los gotch
 | Qdrant | OK (local embebido) | persiste en `./qdrant_storage/` |
 | Material del coach | OK | **`C:\Users\Ilan\Desktop\Ilan\Seduccion`** (360GB) — las tres junctions de `data/raw` apuntan ahi y resuelven bien; ver gotcha #7 |
 | Deploy Fly.io | OK | app `coach-brain-ilan`, región `iad`, 4GB / 2 vCPU shared, siempre prendida |
-| Tests | OK | **364 pasando + 1 salteado** en 21 archivos: `.venv\Scripts\python.exe -m pytest tests/ -q`, ~19 s, sin GPU ni red. Además `scripts\smoke_test.py --quick` |
+| Tests | OK | **636 pasando + 1 salteado** en 25 archivos: `.venv\Scripts\python.exe -m pytest tests/ -q`, ~19 s, sin GPU ni red. Además `scripts\smoke_test.py --quick` |
 
 ---
 
@@ -879,7 +879,7 @@ coach-brain/
 │   ├── escanear_corpus.py    ← pasa ese detector por el corpus vivo; solo lee
 │   ├── reparar_source_path.py    ← reescribe los source_path muertos (gotcha #26)
 │   └── resume, status, watch, transcribe_batches, smoke_test, upload_to_qdrant_cloud
-├── tests/                    ← 364 tests (+1 salteado) en 21 archivos; `python -m pytest tests/ -q`
+├── tests/                    ← 636 tests (+1 salteado) en 25 archivos; `python -m pytest tests/ -q`
 ├── logs/                     ← UTF-16 (gotcha #5)
 └── qdrant_storage/           ← 38.343 vectores — IRREMPLAZABLE sin re-correr todo
 ```
@@ -898,7 +898,7 @@ coach-brain/
    disco externo en lugar de borrarlo, para no perder la opción de re-transcribir.
 4. **Curación manual** — `data/curated/` sigue vacío. La idea era revisar a mano los
    principios extraídos antes de indexar; nunca se hizo. ¿Vale la pena a esta altura?
-5. **Tests** — ya no está vacío: **364 pasando y 1 salteado** en 21 archivos
+5. **Tests** — ya no está vacío: **636 pasando y 1 salteado** en 25 archivos
    (`.venv\Scripts\python.exe -m pytest tests/ -q`). Cubren los umbrales del
    verificador, los cuatro motivos de "sin cubrir", el criterio de duplicado, a quién
    manda a re-transcribir la auditoría sin VAD, su detector de alucinaciones con sus
@@ -938,11 +938,31 @@ coach-brain/
    no se usa, que una env var vacía no tape al `.env`, y que `embed([])` devuelva `[]`
    sin cargar los 2,2 GB del modelo.
 
-   Lo que sigue **sin una sola prueba**: `app/streamlit_app.py` (944 líneas, la
-   interfaz), `ingest/whatsapp_images.py` y `ingest/whatsapp_images_ocr.py` (el OCR de
-   las capturas), `app/pwa.py`, `ingest/drive.py` y `cli.py`. De `ingest/transcribe.py`
-   solo está cubierto el camino sin audio y la anotación de `vad_filter`: transcribir de
-   verdad necesita GPU y un archivo de audio, así que eso no se prueba en la suite.
+   Y desde el 18-11 a la tarde, los seis módulos que seguían sin una sola prueba. El
+   OCR de las capturas (`ingest/whatsapp_images_ocr.py` y `whatsapp_images.py`): el
+   filtro de ruido de WhatsApp línea por línea, el lado del hablante, y los dos huecos
+   que aparecieron al escribirlas — el `_NOISE_RE` no filtraba `9:05 p. m.` con espacio
+   fino ni `Leído`, los dos cerrados en el regex. El CLI (`cli.py`): los ocho nombres de
+   comando, que typer convierte los guiones bajos en guiones medios, y que cada uno
+   delegue a su etapa con los flags que corresponden — si un nombre cambia, los scripts
+   de `scripts/` y lo escrito en el README dejan de funcionar sin que falle nada. La
+   descarga de Drive (`ingest/drive.py`): el reparto por extensión y, lo que importa,
+   que un archivo ya bajado **no se sobreescriba** en una re-descarga. El PWA
+   (`app/pwa.py`), donde el riesgo no es que falle sino que **no** falle: un
+   `__ICON192__` sin reemplazar deja un manifest inválido que el navegador se traga sin
+   decir nada y la app deja de ser instalable, así que la prueba central es negativa.
+   Y la interfaz (`app/streamlit_app.py`, 944 líneas), que no se puede importar porque
+   abajo del marcador `# ============ UI ===` corre `warmup()`: la fixture compila solo
+   la mitad de arriba. Ahí lo crítico es la cookie firmada —la app está publicada y lo
+   único que la separa de cualquiera es el PIN— y el throttling: el `exp` va dentro del
+   HMAC, así que estirar la cookie la invalida; cambiar el PIN invalida las sesiones
+   viejas; del quinto fallo en adelante la espera duplica 30/60/120/240 s con techo de
+   15 minutos; y la IP sale del **primero** del `X-Forwarded-For`, porque el resto de la
+   cadena lo pone el cliente.
+
+   De `ingest/transcribe.py` solo está cubierto el camino sin audio y la anotación de
+   `vad_filter`: transcribir de verdad necesita GPU y un archivo de audio, así que eso
+   no se prueba en la suite. Fuera de eso ya no queda módulo sin pruebas.
 6. **Los 9 grupos de contenido duplicado** — el mismo material entró al pipeline dos
    veces con nombres distintos (4 videos de clase, 3 libros, 2 notas de voz). No falta
    nada: sobra texto repetido en el corpus y en el índice, y eso sesga la búsqueda porque
