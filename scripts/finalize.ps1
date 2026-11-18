@@ -5,8 +5,9 @@
 #   1) Junta las imagenes-chat (OCR) en un transcript   (whatsapp_images_ocr aggregate)
 #   2) Extraccion LOCAL con Ollama/Qwen-14B (resumable)  (kb.extract, backend=ollama)
 #   3) Segunda pasada de extraccion                      (ver OJO 3)
-#   4) Re-indexa Qdrant desde cero (con --reset)         (kb.index --reset)
-#   5) Levanta el MVP                                     (streamlit)
+#   4) Verifica huecos silenciosos del corpus             (scripts\verificar.py)
+#   5) Re-indexa Qdrant desde cero (con --reset)         (kb.index --reset)
+#   6) Levanta el MVP                                     (streamlit)
 #
 # OJO 1: Qdrant embebido toma lock de UN proceso. Este script CIERRA cualquier
 #        Streamlit abierto antes de indexar, pero NO toca un proceso del
@@ -20,7 +21,7 @@
 #        durante la corrida no entra en ella. El paso 1 escribe justamente uno.
 #        De ahi la segunda pasada: es barata, porque saltea todo lo que ya tiene
 #        salida en disco.
-# OJO 4: el paso 4 es DESTRUCTIVO: borra y reconstruye las 3 colecciones de
+# OJO 4: el paso 5 es DESTRUCTIVO: borra y reconstruye las 3 colecciones de
 #        Qdrant, que son las que esta sirviendo la app. Pide confirmacion.
 #        Para saltear la pregunta (desatendido): -Yes
 #
@@ -70,20 +71,27 @@ if ($otros.Count -gt 0) {
 }
 
 # 1) Agregar las imagenes-chat (OCR) al pipeline
-Write-Host "`n[1/5] Agregando screenshots-chat (OCR)..." -ForegroundColor Cyan
+Write-Host "`n[1/6] Agregando screenshots-chat (OCR)..." -ForegroundColor Cyan
 & $py -u -m coach_brain.ingest.whatsapp_images_ocr aggregate 2>&1 | Tee-Object -FilePath logs\finalize.log
 
 # 2) Extraccion LOCAL (Ollama). Lenta pero gratis; resumable. Agarra videos +
 #    notas de voz + imagenes-chat + texto. Puede tardar HORAS/DIAS por el volumen.
-Write-Host "`n[2/5] Extraccion local (Ollama/Qwen-14B, resumable)..." -ForegroundColor Cyan
+Write-Host "`n[2/6] Extraccion local (Ollama/Qwen-14B, resumable)..." -ForegroundColor Cyan
 & $py -u -m coach_brain.kb.extract 2>&1 | Tee-Object -FilePath logs\finalize.log -Append
 
 # 3) Segunda pasada: barata, levanta lo que se escribio despues del glob (OJO 3).
-Write-Host "`n[3/5] Segunda pasada de extraccion..." -ForegroundColor Cyan
+Write-Host "`n[3/6] Segunda pasada de extraccion..." -ForegroundColor Cyan
 & $py -u -m coach_brain.kb.extract 2>&1 | Tee-Object -FilePath logs\finalize.log -Append
 
-# 4) Re-index full con --reset (sino DUPLICA: ver gotcha #12)
-Write-Host "`n[4/5] Indexando en Qdrant (--reset)..." -ForegroundColor Cyan
+# 4) Verificacion de huecos silenciosos. Es de solo lectura y NO aborta: con el
+#    corpus sano igual devuelve 1, porque hay notas de voz cortas que extraen 0
+#    items legitimamente. Corre antes del paso destructivo para que el estado
+#    quede escrito en el log junto al indice que se reconstruye.
+Write-Host "`n[4/6] Verificando huecos del corpus..." -ForegroundColor Cyan
+& $py -u scripts\verificar.py --sin-audio 2>&1 | Tee-Object -FilePath logs\finalize.log -Append
+
+# 5) Re-index full con --reset (sino DUPLICA: ver gotcha #12)
+Write-Host "`n[5/6] Indexando en Qdrant (--reset)..." -ForegroundColor Cyan
 if (-not $Yes) {
     Write-Host "Esto BORRA las 3 colecciones de Qdrant y las reconstruye." -ForegroundColor Yellow
     Write-Host "Es lo que esta sirviendo la app. El backup esta en qdrant_storage.bak\." -ForegroundColor Yellow
@@ -94,5 +102,5 @@ if (-not $Yes) {
 
 # 5) MVP. El deploy a Fly es aparte y a mano: flyctl deploy (hornea el indice
 #    dentro de la imagen, asi que va DESPUES de este paso).
-Write-Host "`n[5/5] Levantando el MVP en http://localhost:8501 ..." -ForegroundColor Green
+Write-Host "`n[6/6] Levantando el MVP en http://localhost:8501 ..." -ForegroundColor Green
 & $py -u -m streamlit run src\coach_brain\app\streamlit_app.py

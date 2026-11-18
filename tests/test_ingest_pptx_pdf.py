@@ -244,3 +244,21 @@ def test_pdf_sin_texto_cae_a_pymupdf_igual(tmp_path: Path, monkeypatch):
 
     assert data["metadata"]["engine"] == "texto-pymupdf"
     assert data["segments"][0]["text"] == "pagina con texto"
+
+
+def test_pdf_engine_registra_pymupdf_y_ocr_juntos(tmp_path: Path, monkeypatch):
+    """Si el texto lo rescato pymupdf y encima entro el OCR, se anotan los dos."""
+    _con_pypdf(monkeypatch, ["Pegadopegadopegadopegado" * 5])
+    monkeypatch.setattr(
+        pdfs, "_pymupdf_segments",
+        lambda path: [{"id": 0, "text": "poco texto con espacios", "start": None,
+                       "end": None, "page": 1}],
+    )
+    monkeypatch.setattr(
+        pdfs, "_ocr_pages",
+        lambda p, dpi=200: ["texto OCR bastante mas largo que el de la capa"],
+    )
+
+    data = pdfs.extract_pdf(tmp_path / "mixto.pdf", ocr=True)
+
+    assert data["metadata"]["engine"] == "texto-pymupdf+rapidocr"

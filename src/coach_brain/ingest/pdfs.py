@@ -182,7 +182,10 @@ def extract_pdf(path: Path, ocr: bool = False) -> dict:
             if used:
                 segments = [by_page[page] for page in sorted(by_page)]
                 full_text_parts = [seg["text"] for seg in segments]
-                engine = "rapidocr" if chars == 0 else "texto+rapidocr"
+                # El motor registrado tiene que decir de donde salio el texto:
+                # si la capa de texto la habia rescatado pymupdf, perder ese
+                # dato haria creer que la dio pypdf.
+                engine = "rapidocr" if chars == 0 else f"{engine}+rapidocr"
         except Exception as e:  # noqa: BLE001
             console.print(f"[red]OCR falló en {path.name}: {e}[/red]")
 
