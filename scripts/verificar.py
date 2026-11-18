@@ -53,7 +53,21 @@ SILENCIO_DB = -60.0
 
 # Habla normal ronda los 800-1000 caracteres por minuto. Por debajo de este
 # piso, con audio suficientemente largo, algo se perdio.
-MIN_CHARS_POR_MINUTO = 60.0
+#
+# El piso esta calibrado contra la distribucion real del corpus, medida sobre
+# los 4097 wa_audio de 30 s o mas (2026-11-17):
+#
+#     minimo 0.0 | p1 467.9 | p5 713.0 | p25 846.1 | mediana 916.9 | p75 980.2
+#
+# Es decir: el 99% de las notas de voz pasa los 467 chars/minuto. El piso
+# estaba en 60.0, siete veces por debajo del percentil 1, asi que un transcript
+# al que el VAD le habia comido el 70% del habla pasaba limpio. Con 250.0 sigue
+# muy por debajo de la cola legitima (las grabaciones de campo con mucho
+# silencio ambiente), pero ya no deja pasar una perdida grande.
+#
+# Esto NO decide nada: marca para que alguien LEA el transcript. Una grabacion
+# de calle con minutos de ruido puede tener densidad baja y estar completa.
+MIN_CHARS_POR_MINUTO = 250.0
 DUR_MINIMA_PARA_JUZGAR = 30.0
 
 # El mismo umbral que usa ingest/pdfs.py para decidir si rasteriza.

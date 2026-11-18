@@ -145,8 +145,21 @@ encuentra algo sospechoso, así que sirve de gate. Revisa:
 
 1. Transcripts con `full_text` vacío, separando el silencio digital (mide el
    volumen de la fuente) del hueco real.
-2. Transcripts con menos de 60 caracteres por minuto de audio, en fuentes de
-   más de 30 segundos. El habla normal ronda los 800-1000.
+2. Transcripts con menos de `MIN_CHARS_POR_MINUTO = 250` caracteres por minuto
+   de audio, en fuentes de más de 30 segundos. El piso está calibrado contra la
+   distribución real del corpus, medida sobre los 4.097 `wa_audio` de 30 s o
+   más (2026-11-17):
+
+   | mínimo | p1 | p5 | p25 | mediana | p75 |
+   |---|---|---|---|---|---|
+   | 0,0 | 467,9 | 713,0 | 846,1 | **916,9** | 980,2 |
+
+   El 99% de las notas de voz pasa los 467 c/min. El piso estaba en 60, siete
+   veces por debajo del percentil 1: un transcript al que el VAD le había
+   comido el 70% del habla pasaba limpio. Con 250 quedan marcados 10 archivos
+   de 120 s o más (eran 7), y sigue muy por debajo de la cola legítima: las
+   grabaciones de calle con minutos de ruido ambiente tienen densidad baja y
+   están completas. Marcar no es decidir: hay que leer el transcript.
 3. PDFs cuya capa de texto no llega a `OCR_MIN_CHARS_PER_PAGE`.
 4. Texto sin espacios: menos de `MIN_SPACE_RATIO = 0.08` de espacios sobre el
    total de caracteres, en transcripts de 300 caracteres o más. Es el único
