@@ -76,6 +76,87 @@ def test_sin_las_carpetas_esperadas_el_parche_no_falla(monkeypatch, tmp_path):
     T._register_cuda_dlls()  # no levanta
 
 
+@pytest.fixture
+def site_packages(tmp_path, monkeypatch):
+    """Un site-packages de juguete con las dos carpetas que el parche espera."""
+    monkeypatch.setattr(T.sys, "platform", "win32")
+    purelib = tmp_path / "site-packages"
+    cublas = purelib / "nvidia" / "cublas" / "bin"
+    ct2 = purelib / "ctranslate2"
+    cublas.mkdir(parents=True)
+    ct2.mkdir(parents=True)
+    monkeypatch.setattr(T.sysconfig, "get_paths", lambda: {"purelib": str(purelib)})
+    return {"cublas": cublas, "ct2": ct2}
+
+
+def test_las_dos_dlls_de_cublas_se_copian_al_lado_de_ctranslate2(site_packages):
+    """Es el parche entero: CTranslate2 carga esas DLLs por nombre con un
+    LoadLibrary que ignora `os.add_dll_directory`, así que la única forma de que
+    las encuentre es tenerlas en su propio directorio. Sin esto, la GPU no
+    transcribe nada en esta máquina."""
+    for name in ("cublas64_12.dll", "cublasLt64_12.dll"):
+        (site_packages["cublas"] / name).write_bytes(b"dll " + name.encode())
+
+    T._register_cuda_dlls()
+
+    for name in ("cublas64_12.dll", "cublasLt64_12.dll"):
+        copiada = site_packages["ct2"] / name
+        assert copiada.exists(), f"falta {name}"
+        assert copiada.read_bytes() == b"dll " + name.encode()
+
+
+def test_una_dll_que_ya_esta_no_se_vuelve_a_copiar(site_packages):
+    """`not dst.exists()`: la copia es de 100 MB y corre en cada arranque del
+    transcriptor. Pisarla además rompería una DLL que CTranslate2 ya tenga
+    abierta en otro proceso."""
+    (site_packages["cublas"] / "cublas64_12.dll").write_bytes(b"nueva")
+    ya = site_packages["ct2"] / "cublas64_12.dll"
+    ya.write_bytes(b"la que ya estaba")
+
+    T._register_cuda_dlls()
+
+    assert ya.read_bytes() == b"la que ya estaba"
+
+
+def test_si_falta_una_dll_en_el_origen_se_copia_la_otra(site_packages):
+    """`nvidia-cublas-cu12` podría cambiar de contenido entre versiones. Faltar
+    una no tiene que impedir que la otra llegue ni levantar un error."""
+    (site_packages["cublas"] / "cublasLt64_12.dll").write_bytes(b"lt")
+
+    T._register_cuda_dlls()
+
+    assert (site_packages["ct2"] / "cublasLt64_12.dll").exists()
+    assert not (site_packages["ct2"] / "cublas64_12.dll").exists()
+
+
+def test_cudnn_no_se_copia_nunca(site_packages):
+    """La aporta torch al importarse. Copiar la de CUDA 12 acá chocaría con la
+    de CUDA 13 que torch ya cargó, y eso es un crash del proceso, no un
+    fallback a CPU."""
+    (site_packages["cublas"] / "cublas64_12.dll").write_bytes(b"x")
+    (site_packages["cublas"] / "cudnn64_9.dll").write_bytes(b"no me copies")
+
+    T._register_cuda_dlls()
+
+    assert not (site_packages["ct2"] / "cudnn64_9.dll").exists()
+    assert (site_packages["ct2"] / "cublas64_12.dll").exists(), "cublas si"
+
+
+def test_sin_ctranslate2_no_se_copia_nada(tmp_path, monkeypatch):
+    """Instalación en CPU: está nvidia-cublas-cu12 por alguna otra dependencia
+    pero no ctranslate2. No hay destino al que copiar."""
+    monkeypatch.setattr(T.sys, "platform", "win32")
+    purelib = tmp_path / "site-packages"
+    cublas = purelib / "nvidia" / "cublas" / "bin"
+    cublas.mkdir(parents=True)
+    (cublas / "cublas64_12.dll").write_bytes(b"x")
+    monkeypatch.setattr(T.sysconfig, "get_paths", lambda: {"purelib": str(purelib)})
+
+    T._register_cuda_dlls()  # no levanta
+
+    assert not (purelib / "ctranslate2").exists()
+
+
 # --- 3) el barrido ----------------------------------------------------------
 
 

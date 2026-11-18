@@ -125,6 +125,32 @@ def test_repair_no_toca_las_llaves_dentro_de_un_string():
     assert json.loads(E._repair_json(s)) == json.loads(s)
 
 
+def test_una_comilla_escapada_no_cierra_el_string():
+    """El caso más común de todos: una frase citando a alguien. Si el escaneo
+    tomara la comilla escapada como fin de string, contaría los brackets de
+    adentro del texto y cerraría de más."""
+    cortado = r'{"frases": [{"texto": "me dijo \"hola\" y se fue'
+    assert E._extract_json(cortado) == {
+        "frases": [{"texto": 'me dijo "hola" y se fue'}]
+    }
+
+
+def test_una_barra_escapada_no_escapa_la_comilla_que_sigue():
+    r"""`\` es una barra literal, no el escape de lo que viene después. Sin
+    contar eso, un `"...\\"` dejaría el escaneo adentro del string para siempre
+    y el reparado cerraría todo mal."""
+    s = r'{"a": "una barra \\", "b": 1}'
+    assert json.loads(E._repair_json(s)) == json.loads(s)
+    assert E._extract_json(s) == {"a": "una barra " + chr(92), "b": 1}
+
+
+def test_un_json_que_ni_reparado_parsea_devuelve_none():
+    """No alcanza con que haya llaves: lo que falta acá es el valor, y ninguno
+    de los tres intentos lo puede inventar. `extract_chunk` lo convierte en las
+    tres listas vacías con un aviso que nombra el chunk."""
+    assert E._extract_json('{ "principios": }') is None
+
+
 # --- 3) un chunk que falla no se lleva el transcript ------------------------
 
 
@@ -243,3 +269,16 @@ def test_el_nombre_de_salida_es_el_que_lee_el_indexador(entorno, monkeypatch):
     })
     E.run()
     assert [p.name for p in edir.iterdir()] == ["wa_audio_0001.extracted.json"]
+
+
+def test_sin_transcripts_avisa_y_no_abre_el_cliente(entorno, monkeypatch, capsys):
+    """El orden importa: la lista de transcripts se mira ANTES de construir el
+    cliente. Con la carpeta vacía y el backend en anthropic, pedir la API key
+    primero haría fallar una corrida que no tenía nada que hacer."""
+    monkeypatch.setattr(settings, "extractor_backend", "anthropic")
+    monkeypatch.setattr(E, "_client", lambda: (_ for _ in ()).throw(
+        AssertionError("no tiene que construir el cliente")))
+
+    E.run()
+
+    assert "No hay transcripts" in capsys.readouterr().out

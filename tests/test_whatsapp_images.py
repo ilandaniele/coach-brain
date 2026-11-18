@@ -724,3 +724,45 @@ def test_sin_chats_el_ocr_tampoco_escribe(arbol):
     guardar(out, "a.json", es_chat=False, transcripcion="", source_file="a.png")
     O.aggregate()
     assert not (arbol / "processed" / "transcripts" / "whatsapp_images_chats.json").exists()
+
+
+def test_un_json_ilegible_no_corta_el_agregado_del_ocr(arbol, capsys):
+    """Son 8953 archivos escritos de a uno a lo largo de horas. Si una corrida
+    se corta en el medio de un `write_text`, queda un JSON truncado, y abortar
+    por ése dejaría el transcript sin escribir."""
+    out = arbol / "processed" / "whatsapp_images_ocr"
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "a_roto.json").write_text("{esto no cier", encoding="utf-8")
+    guardar(out, "b_sano.json", es_chat=True,
+            transcripcion="OTRO: hola", source_file="b.png")
+
+    O.aggregate()
+
+    d = json.loads(
+        (arbol / "processed" / "transcripts" / "whatsapp_images_chats.json")
+        .read_text(encoding="utf-8")
+    )
+    assert len(d["segments"]) == 1, "el sano se agrego igual"
+    assert d["metadata"]["total_imagenes_procesadas"] == 2, "el roto se conto"
+
+
+def test_el_ocr_a_medias_tampoco_pisa_al_transcript_completo(arbol, capsys):
+    """La guarda es simétrica: el riesgo no es sólo que vision pise al OCR. Un
+    `aggregate` del OCR corrido con la carpeta a medio llenar pisaría igual."""
+    destino = arbol / "processed" / "transcripts" / "whatsapp_images_chats.json"
+    out = arbol / "processed" / "whatsapp_images_ocr"
+    for i in range(4):
+        guardar(out, f"o{i}.json", es_chat=True,
+                transcripcion=f"OTRO: ocr {i}", source_file=f"o{i}.png")
+    O.aggregate()
+    assert len(json.loads(destino.read_text(encoding="utf-8"))["segments"]) == 4
+
+    for i in range(1, 4):  # como si la carpeta hubiera quedado con uno solo
+        (out / f"o{i}.json").unlink()
+    capsys.readouterr()
+
+    O.aggregate()
+
+    d = json.loads(destino.read_text(encoding="utf-8"))
+    assert len(d["segments"]) == 4, "no se piso con el agregado de 1"
+    assert "No escribo" in capsys.readouterr().out
