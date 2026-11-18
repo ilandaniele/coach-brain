@@ -866,7 +866,7 @@ coach-brain/
 │   ├── escanear_corpus.py    ← pasa ese detector por el corpus vivo; solo lee
 │   ├── reparar_source_path.py    ← reescribe los source_path muertos (gotcha #26)
 │   └── resume, status, watch, transcribe_batches, smoke_test, upload_to_qdrant_cloud
-├── tests/                    ← 173 tests en 15 archivos; `python -m pytest tests/ -q`
+├── tests/                    ← 210 tests en 17 archivos; `python -m pytest tests/ -q`
 ├── logs/                     ← UTF-16 (gotcha #5)
 └── qdrant_storage/           ← 38.343 vectores — IRREMPLAZABLE sin re-correr todo
 ```
@@ -885,7 +885,7 @@ coach-brain/
    disco externo en lugar de borrarlo, para no perder la opción de re-transcribir.
 4. **Curación manual** — `data/curated/` sigue vacío. La idea era revisar a mano los
    principios extraídos antes de indexar; nunca se hizo. ¿Vale la pena a esta altura?
-5. **Tests** — ya no está vacío: **173 tests pasando** en 15 archivos
+5. **Tests** — ya no está vacío: **210 tests pasando** en 17 archivos
    (`.venv\Scripts\python.exe -m pytest tests/ -q`). Cubren los umbrales del
    verificador, los cuatro motivos de "sin cubrir", el criterio de duplicado, a quién
    manda a re-transcribir la auditoría sin VAD, su detector de alucinaciones con sus
@@ -896,9 +896,19 @@ coach-brain/
    alrededor, coma colgante, cortadas por `max_tokens`), que el salteo resumible sea
    por **existencia** del archivo y no por contenido (gotcha #13) y que una extracción
    con 0 items no escriba un solo punto en Qdrant — la frase de la que depende el
-   informe del paso 6. Corren con un doble en lugar de Ollama y de Qdrant, así que no
-   piden GPU ni abren el índice. Lo que sigue **sin una sola prueba** es la
-   transcripción: necesita GPU y un archivo de audio de verdad.
+   informe del paso 6. Y el camino de la consulta, que es el que el usuario toca en
+   cada pregunta: que el umbral de score llegue a `query_points` (sin él la búsqueda
+   devuelve los principios menos lejanos para cualquier pregunta, y el system prompt
+   le dice al modelo que lo recuperado le gana a su criterio), que un resultado vacío
+   se vea como `(ninguno recuperado)` en vez de un bloque en blanco, que una
+   colección caída no se lleve las otras dos, que el modelo se pueda pisar con
+   `COACH_MODEL_<PROVEEDOR>` cuando el proveedor lo deprecia, que el `token_floor`
+   levante un `max_tokens` chico (los modelos con thinking devuelven contenido vacío,
+   no un error) y que `complete_fast()` nunca levante: devuelve `""` y la tarea chica
+   no corta la respuesta principal. Corren con un doble en lugar de Ollama, de Qdrant
+   y de `httpx`, así que no piden GPU, ni abren el índice, ni hacen una llamada de
+   red. Lo que sigue **sin una sola prueba** es la transcripción: necesita GPU y un
+   archivo de audio de verdad.
 6. **Los 9 grupos de contenido duplicado** — el mismo material entró al pipeline dos
    veces con nombres distintos (4 videos de clase, 3 libros, 2 notas de voz). No falta
    nada: sobra texto repetido en el corpus y en el índice, y eso sesga la búsqueda porque
