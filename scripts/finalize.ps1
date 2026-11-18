@@ -76,16 +76,16 @@ if ($otros.Count -gt 0) {
 }
 
 # 1) Agregar las imagenes-chat (OCR) al pipeline
-Write-Host "`n[1/6] Agregando screenshots-chat (OCR)..." -ForegroundColor Cyan
+Write-Host "`n[1/8] Agregando screenshots-chat (OCR)..." -ForegroundColor Cyan
 & $py -u -m coach_brain.ingest.whatsapp_images_ocr aggregate 2>&1 | Tee-Object -FilePath logs\finalize.log
 
 # 2) Extraccion LOCAL (Ollama). Lenta pero gratis; resumable. Agarra videos +
 #    notas de voz + imagenes-chat + texto. Puede tardar HORAS/DIAS por el volumen.
-Write-Host "`n[2/6] Extraccion local (Ollama/Qwen-14B, resumable)..." -ForegroundColor Cyan
+Write-Host "`n[2/8] Extraccion local (Ollama/Qwen-14B, resumable)..." -ForegroundColor Cyan
 & $py -u -m coach_brain.kb.extract 2>&1 | Tee-Object -FilePath logs\finalize.log -Append
 
 # 3) Segunda pasada: barata, levanta lo que se escribio despues del glob (OJO 3).
-Write-Host "`n[3/6] Segunda pasada de extraccion..." -ForegroundColor Cyan
+Write-Host "`n[3/8] Segunda pasada de extraccion..." -ForegroundColor Cyan
 & $py -u -m coach_brain.kb.extract 2>&1 | Tee-Object -FilePath logs\finalize.log -Append
 
 # 4) Verificacion de huecos silenciosos. Es de solo lectura y NO aborta: con el
@@ -101,7 +101,7 @@ Write-Host "`n[4/8] Verificando huecos del corpus..." -ForegroundColor Cyan
 Write-Host "`n[5/8] Auditoria sin VAD (informe, no promueve nada)..." -ForegroundColor Cyan
 & $py -u scripts\retranscribir_sin_vad.py --juzgar 2>&1 | Tee-Object -FilePath logs\finalize.log -Append
 
-# 5) Re-index full con --reset (sino DUPLICA: ver gotcha #12)
+# 6) Re-index full con --reset (sino DUPLICA: ver gotcha #12)
 Write-Host "`n[6/8] Indexando en Qdrant (--reset)..." -ForegroundColor Cyan
 if (-not $Yes) {
     Write-Host "Esto BORRA las 3 colecciones de Qdrant y las reconstruye." -ForegroundColor Yellow
