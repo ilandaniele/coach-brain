@@ -220,6 +220,151 @@ def test_un_error_que_no_es_rate_limit_no_se_reintenta(tmp_path):
     assert not (out / "a.json").exists()  # un error no deja un JSON a medias
 
 
+# --- run (vision): la corrida que cuesta plata --------------------------------
+
+def anthropic_falso(monkeypatch, cliente):
+    """Reemplaza el `from anthropic import Anthropic` que hace `run()`."""
+    modulo = type(sys)("anthropic")
+    construidos = []
+
+    def Anthropic(**kw):  # noqa: N802 - el nombre lo fija la libreria
+        construidos.append(kw)
+        return cliente
+
+    modulo.Anthropic = Anthropic
+    monkeypatch.setitem(sys.modules, "anthropic", modulo)
+    return construidos
+
+
+def test_sin_carpeta_de_whatsapp_no_se_construye_el_cliente(tmp_path, monkeypatch, capsys):
+    """Es la primera linea de defensa contra gastar plata por un path mal
+    configurado: sin imagenes que mandar, no se arma ni el cliente."""
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    construidos = anthropic_falso(monkeypatch, FakeClient())
+
+    V.run()
+
+    assert "No existe" in capsys.readouterr().out
+    assert construidos == []
+
+
+def test_sin_imagenes_no_se_construye_el_cliente(arbol, monkeypatch, capsys):
+    (arbol / "raw" / "whatsapp" / "notas.txt").write_text("hola", encoding="utf-8")
+    construidos = anthropic_falso(monkeypatch, FakeClient())
+
+    V.run()
+
+    assert "No hay imágenes" in capsys.readouterr().out
+    assert construidos == []
+
+
+def test_las_ya_procesadas_no_se_vuelven_a_pagar(arbol, monkeypatch, capsys):
+    """La corrida de vision quedo a medias con 4074 imagenes ya hechas. Que
+    `pending` las saltee es lo que evita pagarlas de nuevo si alguien reintenta."""
+    for n in ("a", "b", "c"):
+        imagen(arbol / "raw" / "whatsapp" / f"{n}.png")
+    hechas = arbol / "processed" / "whatsapp_images"
+    hechas.mkdir(parents=True)
+    (hechas / "a.json").write_text("{}", encoding="utf-8")
+
+    cli = FakeClient(FakeResp('{"es_chat": false, "descripcion": "meme"}'),
+                     FakeResp('{"es_chat": false, "descripcion": "meme"}'))
+    anthropic_falso(monkeypatch, cli)
+    V.run(workers=1)
+
+    salida = capsys.readouterr().out
+    assert "3 total, 2 pendientes" in salida
+    assert len(cli.llamadas) == 2
+
+
+def test_el_limite_corta_la_corrida_de_vision(arbol, monkeypatch, capsys):
+    """`--limit` es como se prueba el prompt en diez imagenes antes de largarlo
+    sobre las 4904 que faltan."""
+    for n in ("a", "b", "c", "d"):
+        imagen(arbol / "raw" / "whatsapp" / f"{n}.png")
+    cli = FakeClient(*[FakeResp('{"es_chat": true, "transcripcion": "EL: hola"}')
+                       for _ in range(4)])
+    anthropic_falso(monkeypatch, cli)
+
+    V.run(workers=1, limit=2)
+
+    assert "4 total, 2 pendientes" in capsys.readouterr().out
+    assert len(cli.llamadas) == 2
+
+
+def test_un_limite_en_cero_no_corta_nada(arbol, monkeypatch, capsys):
+    """`limit=0` es el default y significa "todas", no "ninguna"."""
+    for n in ("a", "b"):
+        imagen(arbol / "raw" / "whatsapp" / f"{n}.png")
+    cli = FakeClient(*[FakeResp("{}") for _ in range(2)])
+    anthropic_falso(monkeypatch, cli)
+
+    V.run(workers=1, limit=0)
+
+    assert len(cli.llamadas) == 2
+
+
+def test_el_resumen_cuenta_chats_y_no_chats(arbol, monkeypatch, capsys):
+    for n in ("a", "b"):
+        imagen(arbol / "raw" / "whatsapp" / f"{n}.png")
+    cli = FakeClient(FakeResp('{"es_chat": true, "transcripcion": "EL: hola"}'),
+                     FakeResp('{"es_chat": false, "descripcion": "un meme"}'))
+    anthropic_falso(monkeypatch, cli)
+
+    V.run(workers=1)
+
+    salida = capsys.readouterr().out
+    assert "'chat': 1" in salida
+    assert "'other': 1" in salida
+
+
+def test_un_error_se_cuenta_y_no_detiene_la_corrida(arbol, monkeypatch, capsys):
+    """La corrida real murio con `err:BadRequestError: 3927` de 7952: los
+    errores se cuentan y las demas imagenes siguen."""
+    for n in ("a", "b"):
+        imagen(arbol / "raw" / "whatsapp" / f"{n}.png")
+    cli = FakeClient(ValueError("imagen rechazada"),
+                     FakeResp('{"es_chat": true, "transcripcion": "EL: hola"}'))
+    anthropic_falso(monkeypatch, cli)
+
+    V.run(workers=1)
+
+    salida = capsys.readouterr().out
+    assert "err:ValueError" in salida
+    assert "'chat': 1" in salida
+
+
+def test_se_barren_las_subcarpetas_y_solo_las_imagenes(arbol, monkeypatch, capsys):
+    imagen(arbol / "raw" / "whatsapp" / "sub" / "hondo" / "a.JPG")
+    imagen(arbol / "raw" / "whatsapp" / "b.webp")
+    (arbol / "raw" / "whatsapp" / "chat.txt").write_text("x", encoding="utf-8")
+    cli = FakeClient(*[FakeResp("{}") for _ in range(2)])
+    anthropic_falso(monkeypatch, cli)
+
+    V.run(workers=1)
+
+    assert "2 total, 2 pendientes" in capsys.readouterr().out
+
+
+def test_la_carpeta_de_salida_se_crea(arbol, monkeypatch):
+    imagen(arbol / "raw" / "whatsapp" / "a.png")
+    anthropic_falso(monkeypatch, FakeClient(FakeResp("{}")))
+
+    V.run(workers=1)
+
+    assert (arbol / "processed" / "whatsapp_images" / "a.json").exists()
+
+
+def test_el_cliente_se_arma_con_la_key_configurada(arbol, monkeypatch):
+    imagen(arbol / "raw" / "whatsapp" / "a.png")
+    monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-de-prueba")
+    construidos = anthropic_falso(monkeypatch, FakeClient(FakeResp("{}")))
+
+    V.run(workers=1)
+
+    assert construidos == [{"api_key": "sk-ant-de-prueba"}]
+
+
 # --- aggregate (vision) ----------------------------------------------------
 
 def guardar(out_dir, nombre, **campos):
@@ -515,8 +660,10 @@ def test_el_agregado_del_ocr_marca_el_motor(arbol):
 
 def test_el_ocr_y_la_vision_escriben_el_mismo_archivo(arbol):
     """Los dos apuntan a `whatsapp_images_chats.json`: el que corre segundo
-    pisa al primero. Está así a propósito (el resto del pipeline no cambia),
-    pero significa que no se pueden usar los dos a la vez."""
+    pisa al primero mientras no sea más chico. Está así a propósito (el resto
+    del pipeline no cambia), pero significa que no se pueden usar los dos a la
+    vez. El achique lo frena `ingest/_guard.py`, con sus propios tests en
+    `tests/test_transcript_guard.py` y el de acá abajo."""
     guardar(arbol / "processed" / "whatsapp_images", "v.json",
             es_chat=True, transcripcion="EL: vision", source_file="v.png")
     guardar(arbol / "processed" / "whatsapp_images_ocr", "o.json",
@@ -528,6 +675,48 @@ def test_el_ocr_y_la_vision_escriben_el_mismo_archivo(arbol):
     O.aggregate()
     texto = destino.read_text(encoding="utf-8")
     assert "ocr" in texto and "vision" not in texto
+
+
+def test_la_vision_a_medias_no_pisa_al_ocr_completo(arbol, capsys):
+    """El caso de disco, de punta a punta: la corrida de vision quedó en 2873
+    chats de 8978 imágenes y la de OCR terminó en 6336. Antes de la guarda, un
+    `whatsapp_images aggregate` tecleado por costumbre dejaba el transcript con
+    menos de la mitad del material, sin un error y sin backup."""
+    destino = arbol / "processed" / "transcripts" / "whatsapp_images_chats.json"
+    ocr = arbol / "processed" / "whatsapp_images_ocr"
+    for i in range(3):
+        guardar(ocr, f"o{i}.json", es_chat=True,
+                transcripcion=f"OTRO: ocr {i}", source_file=f"o{i}.png")
+    O.aggregate()
+    assert len(json.loads(destino.read_text(encoding="utf-8"))["segments"]) == 3
+
+    guardar(arbol / "processed" / "whatsapp_images", "v.json",
+            es_chat=True, transcripcion="EL: vision", source_file="v.png")
+    V.aggregate()
+
+    d = json.loads(destino.read_text(encoding="utf-8"))
+    assert len(d["segments"]) == 3
+    assert d["metadata"]["engine"] == "rapidocr"
+    assert "No escribo" in capsys.readouterr().out
+
+
+def test_con_force_la_vision_pisa_al_ocr(arbol):
+    """La guarda no es un candado: si la decisión es a propósito, `force` la
+    pasa por encima."""
+    destino = arbol / "processed" / "transcripts" / "whatsapp_images_chats.json"
+    ocr = arbol / "processed" / "whatsapp_images_ocr"
+    for i in range(3):
+        guardar(ocr, f"o{i}.json", es_chat=True,
+                transcripcion=f"OTRO: ocr {i}", source_file=f"o{i}.png")
+    O.aggregate()
+    guardar(arbol / "processed" / "whatsapp_images", "v.json",
+            es_chat=True, transcripcion="EL: vision", source_file="v.png")
+
+    V.aggregate(force=True)
+
+    d = json.loads(destino.read_text(encoding="utf-8"))
+    assert len(d["segments"]) == 1
+    assert d["title"].endswith("vision")
 
 
 def test_sin_chats_el_ocr_tampoco_escribe(arbol):

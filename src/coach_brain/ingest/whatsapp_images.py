@@ -23,6 +23,7 @@ import typer
 from PIL import Image
 from rich.console import Console
 
+from coach_brain.ingest._guard import write_transcript
 from coach_brain.settings import settings
 
 console = Console()
@@ -151,7 +152,7 @@ def run(workers: int = 4, limit: int = 0) -> None:
     console.print(f"[green]Listo[/green] — {counts}")
 
 
-def aggregate() -> None:
+def aggregate(force: bool = False) -> None:
     """Junta las imágenes que son chat en un transcript para el pipeline."""
     out_dir = settings.processed_path / "whatsapp_images"
     results = sorted(out_dir.glob("*.json"))
@@ -190,7 +191,10 @@ def aggregate() -> None:
         "full_text": full_text,
     }
     out_path = settings.transcripts_path / "whatsapp_images_chats.json"
-    out_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    # Los dos motores escriben este mismo archivo: la guarda evita que el parcial
+    # pise al completo. Ver ingest/_guard.py.
+    if not write_transcript(out_path, data, force=force):
+        return
     console.print(f"[green]OK[/green] {len(chats)} chats de {len(results)} imágenes -> {out_path.name}")
 
 
