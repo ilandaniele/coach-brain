@@ -21,6 +21,10 @@ Que revisa:
   5. Transcripts sin extraccion, y extracciones con 0 items.
   6. Extracciones cuyo transcript ya no existe.
 
+Ademas lista, sin contarlos como sospechosos, los transcripts hechos sin VAD:
+no son un hueco, pero sin el filtro de voz Whisper alucina sobre ruido, asi
+que ese texto hay que leerlo antes de confiar en el.
+
 Uso:
   .venv\\Scripts\\python.exe scripts/verificar.py
   .venv\\Scripts\\python.exe scripts/verificar.py --sin-audio   (no mide volumen)
@@ -115,6 +119,8 @@ def cargar():
             "dur": md.get("duration_seconds") or 0.0,
             "pages": md.get("pages") or 0,
             "engine": md.get("engine"),
+            # None en los transcripts viejos, hechos antes de que se anotara.
+            "vad": md.get("vad_filter"),
             "fuente": abs_src if abs_src is not None and abs_src.exists() else None,
             "ilegible": None,
         })
@@ -188,6 +194,20 @@ def revisar_transcripts(ts, medir_audio: bool) -> int:
         print("   esp=%.4f %8d chars  engine=%s  %s"
               % (t["espacios"], t["chars"], t["engine"], t["archivo"]))
     sospechosos += len(pegados)
+
+    # Un transcript hecho sin VAD no es un hueco, pero tampoco es texto
+    # confiable: sin el filtro de voz, Whisper alucina frases de su corpus de
+    # entrenamiento sobre musica y ruido ("Gracias por ver el video",
+    # "!Suscribete!" en loop). Se usa a proposito para auditar, y el resultado
+    # hay que LEERLO antes de indexarlo. Por eso se listan, sin contarlos como
+    # sospechosos: el que lo corrio sabe lo que hizo, pero el que venga despues
+    # no tiene otra forma de enterarse.
+    sin_vad = [t for t in ts if t.get("vad") is False]
+    if sin_vad:
+        print("\nTranscripts hechos SIN VAD (texto a leer antes de confiar): %d"
+              % len(sin_vad))
+        for t in sorted(sin_vad, key=lambda t: t["archivo"]):
+            print("   %8d chars  %s" % (t["chars"], t["archivo"]))
 
     return sospechosos
 
