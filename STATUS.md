@@ -32,7 +32,7 @@ Overview y setup en `README.md`. Este archivo es el estado operativo y los gotch
 | Qdrant | OK (local embebido) | persiste en `./qdrant_storage/` |
 | Material del coach | OK | **`C:\Users\Ilan\Desktop\Ilan\Seduccion`** (360GB) — las tres junctions de `data/raw` apuntan ahi y resuelven bien; ver gotcha #7 |
 | Deploy Fly.io | OK | app `coach-brain-ilan`, región `iad`, 4GB / 2 vCPU shared, siempre prendida |
-| Tests | OK | **636 pasando + 1 salteado** en 25 archivos: `.venv\Scripts\python.exe -m pytest tests/ -q`, ~19 s, sin GPU ni red. Además `scripts\smoke_test.py --quick` |
+| Tests | OK | **867 pasando + 1 salteado** en 33 archivos: `.venv\Scripts\python.exe -m pytest tests/ -q`, ~35 s, sin GPU ni red. Cobertura 82 % sobre `src/coach_brain`. Además `scripts\smoke_test.py --quick` |
 
 ---
 
@@ -825,6 +825,37 @@ La lección es la misma en los dos: **una fracción solo significa algo si arrib
 y abajo se miden sobre el mismo texto**, y una comparación de igualdad solo
 detecta lo que viene exactamente igual.
 
+### 29. Dos módulos escriben el mismo transcript, y uno quedó a medias
+
+`ingest/whatsapp_images.py` (vision con Haiku) y `ingest/whatsapp_images_ocr.py`
+(OCR local) escriben **el mismo archivo** —`transcripts/whatsapp_images_chats.json`—
+con el mismo `source_id`. Eso es a propósito: así el resto del pipeline no tiene
+que saber con qué motor se sacó el texto.
+
+Lo que no es a propósito es cómo quedaron las dos corridas, y sigue así en disco:
+
+| Corrida | Imágenes | Chats | Estado |
+|---|---|---|---|
+| vision (Haiku) | 4074 de 8978 | 2873 | abandonada: fallaba (`err:BadRequestError` en 3927 de 7952) y cuesta plata por imagen |
+| OCR local (RapidOCR) | 8953 | 6336 | terminada, 2,6 MB de texto, es la que está en el índice |
+
+Un `python -m coach_brain.ingest.whatsapp_images aggregate` tecleado por
+costumbre pisaba el transcript bueno con el parcial: 6336 segmentos pasaban a
+2873, sin un error, sin backup y con el mismo nombre de archivo. Después
+`kb.extract` lo re-extrae y `kb.index --reset` lo publica, así que la pérdida
+llegaba hasta el índice que sirve las respuestas.
+
+Cerrado en `ingest/_guard.py`: los dos `aggregate()` escriben por
+`write_transcript()`, que **no pisa un transcript que tenga más segmentos que el
+que se va a escribir** y dice cuántos se habrían perdido. Igual o más grande
+escribe sin flags, porque re-agregar con material nuevo es lo normal.
+`aggregate(force=True)` lo pisa igual. Se mide en segmentos y no en bytes porque
+el segmento es la unidad que se vuelve chunk y después vector.
+
+Queda una decisión que no es de código: `data/processed/whatsapp_images/` son
+13 MB de resultados de una corrida abandonada que ya no alimentan nada. Borrarlos
+o dejarlos como registro es decisión de Ilan.
+
 ## Costos reales
 
 | Etapa | Costo |
@@ -879,7 +910,7 @@ coach-brain/
 │   ├── escanear_corpus.py    ← pasa ese detector por el corpus vivo; solo lee
 │   ├── reparar_source_path.py    ← reescribe los source_path muertos (gotcha #26)
 │   └── resume, status, watch, transcribe_batches, smoke_test, upload_to_qdrant_cloud
-├── tests/                    ← 636 tests (+1 salteado) en 25 archivos; `python -m pytest tests/ -q`
+├── tests/                    ← 867 tests (+1 salteado) en 33 archivos; `python -m pytest tests/ -q`
 ├── logs/                     ← UTF-16 (gotcha #5)
 └── qdrant_storage/           ← 38.343 vectores — IRREMPLAZABLE sin re-correr todo
 ```
@@ -898,7 +929,7 @@ coach-brain/
    disco externo en lugar de borrarlo, para no perder la opción de re-transcribir.
 4. **Curación manual** — `data/curated/` sigue vacío. La idea era revisar a mano los
    principios extraídos antes de indexar; nunca se hizo. ¿Vale la pena a esta altura?
-5. **Tests** — ya no está vacío: **636 pasando y 1 salteado** en 25 archivos
+5. **Tests** — ya no está vacío: **867 pasando y 1 salteado** en 33 archivos
    (`.venv\Scripts\python.exe -m pytest tests/ -q`). Cubren los umbrales del
    verificador, los cuatro motivos de "sin cubrir", el criterio de duplicado, a quién
    manda a re-transcribir la auditoría sin VAD, su detector de alucinaciones con sus
