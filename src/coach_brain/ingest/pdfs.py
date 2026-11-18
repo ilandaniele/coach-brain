@@ -26,6 +26,12 @@ def _relpath(p: Path) -> str:
 
 _OCR_ENGINE = None
 
+# Debajo de este promedio de caracteres por pagina se considera que la capa de
+# texto del PDF no alcanza y vale la pena rasterizar. Un PDF de texto real
+# ronda los 1500-3000 por pagina; una exportacion de Canva o una presentacion
+# hecha de imagenes cae bajo los 300.
+OCR_MIN_CHARS_PER_PAGE = 400
+
 
 def _ocr_pages(path: Path, dpi: int = 200) -> list[str]:
     """Rasteriza cada pagina y le pasa OCR local (RapidOCR).
@@ -94,16 +100,41 @@ def extract_pdf(path: Path, ocr: bool = False) -> dict:
             console.print(f"[yellow]pymupdf fallback falló: {e}[/yellow]")
 
     engine = "texto"
-    if not segments and ocr:
-        console.print(f"[cyan]OCR sobre {n_pages} páginas de {path.name}...[/cyan]")
+    # El OCR no se dispara solo cuando no hay NADA de texto. Un PDF puede traer
+    # una capa de texto casi vacia y seguir siendo ilegible: una exportacion de
+    # Canva, por ejemplo, trae los titulos de los cuadros pero el contenido es
+    # imagen. Por eso tambien se rasteriza cuando el texto extraido es
+    # sospechosamente pobre para la cantidad de paginas.
+    chars = sum(len(seg["text"]) for seg in segments)
+    thin = n_pages > 0 and chars < OCR_MIN_CHARS_PER_PAGE * n_pages
+    if ocr and (not segments or thin):
+        console.print(
+            f"[cyan]OCR sobre {n_pages} páginas de {path.name} "
+            f"({chars} chars de capa de texto)...[/cyan]"
+        )
         try:
+            by_page = {seg["page"]: seg for seg in segments}
+            used = False
             for i, text in enumerate(_ocr_pages(path)):
-                if text:
-                    segments.append(
-                        {"id": i, "text": text, "start": None, "end": None, "page": i + 1}
-                    )
-                    full_text_parts.append(text)
-            engine = "rapidocr"
+                if not text:
+                    continue
+                prev = by_page.get(i + 1)
+                # Se queda el que mas texto trae. Si la pagina ya tenia una capa
+                # de texto buena, el OCR no la puede empeorar.
+                if prev is not None and len(prev["text"]) >= len(text):
+                    continue
+                by_page[i + 1] = {
+                    "id": i,
+                    "text": text,
+                    "start": None,
+                    "end": None,
+                    "page": i + 1,
+                }
+                used = True
+            if used:
+                segments = [by_page[page] for page in sorted(by_page)]
+                full_text_parts = [seg["text"] for seg in segments]
+                engine = "rapidocr" if chars == 0 else "texto+rapidocr"
         except Exception as e:  # noqa: BLE001
             console.print(f"[red]OCR falló en {path.name}: {e}[/red]")
 

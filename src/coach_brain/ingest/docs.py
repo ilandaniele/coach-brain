@@ -1,10 +1,13 @@
-"""Ingestor de documentos (.docx, .epub) → JSON transcripts unificados."""
+"""Ingestor de documentos (.docx, .epub, .pptx) → JSON transcripts unificados."""
 
 from __future__ import annotations
 
 import html
 import json
+import os
+import posixpath
 import re
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,6 +21,7 @@ console = Console()
 
 DOCX_EXT = {".docx"}
 EPUB_EXT = {".epub"}
+PPTX_EXT = {".pptx"}
 
 _TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"[ \t\f\v]+")
@@ -70,6 +74,73 @@ def extract_epub(path: Path) -> list[str]:
     return parts
 
 
+_SLIDE_RE = re.compile(r"^ppt/slides/slide(\d+)\.xml$")
+_NOTES_TARGET_RE = re.compile(r'Target="([^"]*notesSlide\d+\.xml)"')
+_RUN_RE = re.compile(r"<a:t>(.*?)</a:t>", re.S)
+_PARA_END_RE = re.compile(r"</a:p>")
+
+
+def _pptx_slide_text(xml: str) -> str:
+    """Texto de una diapositiva, un parrafo por linea.
+
+    Un .pptx es un zip de XML: cada corrida de texto es un <a:t> y cada
+    parrafo un <a:p>. Se parte por parrafo para no pegar el titulo con el
+    cuerpo, y se concatenan las corridas dentro de cada parrafo porque
+    PowerPoint parte una misma frase en varias cuando cambia el formato.
+    """
+    lines: list[str] = []
+    for chunk in _PARA_END_RE.split(xml):
+        runs = [html.unescape(m.group(1)) for m in _RUN_RE.finditer(chunk)]
+        line = _clean("".join(runs))
+        if line:
+            lines.append(line)
+    return "\n".join(lines)
+
+
+def extract_pptx(path: Path) -> list[str]:
+    """Devuelve un bloque de texto por diapositiva de un .pptx.
+
+    Las notas del orador van pegadas a su diapositiva, prefijadas con
+    "Notas:", porque suelen tener el desarrollo de lo que el titulo resume.
+    No se usa python-pptx a proposito: el formato es XML en un zip y el
+    stdlib alcanza, igual que para el .epub.
+    """
+    parts: list[str] = []
+    with zipfile.ZipFile(path) as z:
+        names = set(z.namelist())
+        slides = {}
+        for name in names:
+            m = _SLIDE_RE.match(name)
+            if m:
+                slides[int(m.group(1))] = name
+        for idx in sorted(slides):
+            slide = slides[idx]
+            text = _pptx_slide_text(z.read(slide).decode("utf-8", errors="ignore"))
+            ntext = ""
+            rels = f"ppt/slides/_rels/{slide.rsplit('/', 1)[1]}.rels"
+            if rels in names:
+                m = _NOTES_TARGET_RE.search(z.read(rels).decode("utf-8", errors="ignore"))
+                if m:
+                    target = posixpath.normpath(
+                        posixpath.join("ppt/slides", m.group(1))
+                    )
+                    if target in names:
+                        raw = z.read(target).decode("utf-8", errors="ignore")
+                        ntext = _pptx_slide_text(raw)
+            if ntext:
+                text = (text + "\n\nNotas: " + ntext).strip()
+            if text:
+                parts.append(text)
+    return parts
+
+
+_EXTRACTORS = {
+    "docx": lambda p: extract_docx(p),
+    "epub": lambda p: extract_epub(p),
+    "pptx": lambda p: extract_pptx(p),
+}
+
+
 def build_record(path: Path, source_type: str, parts: list[str]) -> dict:
     segments = [
         {"id": i, "text": t, "start": None, "end": None, "page": None}
@@ -89,17 +160,31 @@ def build_record(path: Path, source_type: str, parts: list[str]) -> dict:
 
 
 def _collect_targets() -> list[tuple[Path, str]]:
-    base = settings.raw_path / "docs"
-    if not base.exists():
-        return []
-    targets: list[tuple[Path, str]] = []
-    for p in base.rglob("*"):
-        suf = p.suffix.lower()
-        if suf in DOCX_EXT:
-            targets.append((p, "docx"))
-        elif suf in EPUB_EXT:
-            targets.append((p, "epub"))
-    return sorted(targets, key=lambda t: t[0].name)
+    """Documentos a ingestar, de todos los roots donde puede haber.
+
+    Hay que mirar `data/raw/whatsapp` además de `data/raw/docs`, porque hubo
+    material que llegó como adjunto de WhatsApp y esta etapa nunca lo vio.
+    Los tres junctions de `data/raw` apuntan al mismo árbol, así que se
+    deduplica por path canónico o se procesa todo varias veces.
+    """
+    roots = [settings.raw_path / "docs", settings.raw_path / "whatsapp"]
+    by_real: dict[str, tuple[Path, str]] = {}
+    for base in roots:
+        if not base.exists():
+            continue
+        for p in base.rglob("*"):
+            suf = p.suffix.lower()
+            if suf in DOCX_EXT:
+                kind = "docx"
+            elif suf in EPUB_EXT:
+                kind = "epub"
+            elif suf in PPTX_EXT:
+                kind = "pptx"
+            else:
+                continue
+            key = os.path.normcase(os.path.realpath(str(p)))
+            by_real.setdefault(key, (p, kind))
+    return sorted(by_real.values(), key=lambda t: t[0].name)
 
 
 def run(force: bool = False) -> None:
@@ -120,7 +205,7 @@ def run(force: bool = False) -> None:
             skip += 1
             continue
         try:
-            parts = extract_docx(path) if source_type == "docx" else extract_epub(path)
+            parts = _EXTRACTORS[source_type](path)
             if not parts:
                 console.print(f"[yellow]Sin texto extraíble: {path.name}[/yellow]")
                 empty += 1
