@@ -101,6 +101,21 @@ def test_exclusion_gana_sobre_el_ffprobe(monkeypatch):
     assert manifest.clasificar_sin_cubrir(rows) == 0
 
 
+def test_video_con_pista_de_audio_sin_transcript_es_hueco(monkeypatch):
+    """Video que SI tiene audio y no tiene transcript: falta procesarlo.
+
+    Es el hueco que mas importa no perder de vista, porque es el unico de los
+    cuatro motivos que se arregla corriendo el pipeline otra vez. Si cayera en
+    la rama de "sin pista de audio" el inventario diria que no hay nada que
+    perder, y se borraria un video con habla adentro.
+    """
+    monkeypatch.setattr(manifest, "_stems_fuera_del_corpus", lambda: set())
+    monkeypatch.setattr(manifest.subprocess, "run", _ffprobe(stdout="0\n"))
+    rows = [_row("data/raw/videos/clase-nueva.mp4")]
+    assert manifest.clasificar_sin_cubrir(rows) == 1
+    assert rows[0]["motivo"] == "HUECO: falta procesarlo"
+
+
 def test_doc_sin_transcript_es_hueco(monkeypatch):
     """Un PDF sin transcript y sin excluir es un hueco: falta procesarlo."""
     monkeypatch.setattr(manifest, "_stems_fuera_del_corpus", lambda: set())
