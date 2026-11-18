@@ -100,6 +100,17 @@ def test_un_json_con_prosa_alrededor_se_rescata():
     assert d["es_chat"] is True
 
 
+def test_un_bloque_entre_llaves_que_tampoco_parsea_cae_al_default():
+    """El rescate por `{`...`}` es el segundo intento, no una garantía: Haiku
+    devuelve a veces una llave sin cerrar o una coma de más. Sin este camino, un
+    `JSONDecodeError` acá cortaba el worker y perdía la imagen entera."""
+    d = V._parse_json('Acá va: {"es_chat": true, "transcripcion": } listo')
+
+    assert d["es_chat"] is False, "lo que no se pudo leer no es un chat"
+    assert d["transcripcion"] == ""
+    assert "es_chat" in d["descripcion"], "la respuesta cruda queda de rastro"
+
+
 def test_una_respuesta_sin_json_cae_al_default():
     d = V._parse_json("no pude leer la imagen")
     assert d == {"es_chat": False, "transcripcion": "", "descripcion": "no pude leer la imagen"}
@@ -290,6 +301,20 @@ def test_el_limite_corta_la_corrida_de_vision(arbol, monkeypatch, capsys):
 
     assert "4 total, 2 pendientes" in capsys.readouterr().out
     assert len(cli.llamadas) == 2
+
+
+def test_cada_100_imagenes_se_avisa_el_avance(arbol, monkeypatch, capsys):
+    """La corrida real son 8978 imágenes a ~4 s cada una: sin este aviso no hay
+    forma de saber si avanza o si se colgó en el rate limit de Anthropic."""
+    for n in range(100):
+        imagen(arbol / "raw" / "whatsapp" / f"img{n:03d}.png")
+    cli = FakeClient(*[FakeResp("{}") for _ in range(100)])
+    anthropic_falso(monkeypatch, cli)
+
+    V.run(workers=2)
+
+    salida = capsys.readouterr().out
+    assert "100/100" in salida, "el aviso de avance no salio"
 
 
 def test_un_limite_en_cero_no_corta_nada(arbol, monkeypatch, capsys):
