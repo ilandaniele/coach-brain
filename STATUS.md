@@ -33,7 +33,7 @@ Overview y setup en `README.md`. Este archivo es el estado operativo y los gotch
 | Material del coach | OK | **`C:\Users\Ilan\Desktop\Ilan\Seduccion`** (360GB) — las tres junctions de `data/raw` apuntan ahi y resuelven bien; ver gotcha #7 |
 | Deploy Fly.io | OK | app `coach-brain-ilan`, región `iad`, 4GB / 2 vCPU shared, siempre prendida |
 | Tests | OK | **1056 pasando + 1 salteado** en 37 archivos: `.venv\Scripts\python.exe -m pytest tests/ -q`, ~20 s, sin GPU ni red. Cobertura **100 % con ramas** sobre `src/coach_brain`, con el piso puesto en `fail_under = 100` en `pyproject.toml`; CI no la mide (pytest-cov no está en `requirements-ci.txt`), la sostiene la corrida local `python -m coverage run -m pytest -q && python -m coverage report`. Además `scripts\smoke_test.py --quick` |
-| CI (GitHub Actions) | Escrito, sin pushear | `.github/workflows/ci.yml`: ruff + la suite completa en un runner Linux sin GPU, con `requirements-ci.txt` + torch del índice CPU. Verificado localmente simulando el runner; falta `git push` (ver más abajo) |
+| CI (GitHub Actions) | **Verde** | `.github/workflows/ci.yml`: ruff + la suite completa en un runner Linux sin GPU, con `requirements-ci.txt` + torch del índice CPU. Pusheado el 18/11 a las 12:50 y verde en su primera corrida (`gh run 44307793181`): `All checks passed!` y **1057 passed in 26.21s**, 56 s de punta a punta |
 
 ---
 
@@ -1039,7 +1039,7 @@ coach-brain/
 
 ---
 
-## CI (escrito, todavía sin pushear)
+## CI (pusheado y verde)
 
 `.github/workflows/ci.yml` corre en cada push y cada pull request sobre un runner Linux
 sin GPU: instala Python 3.12 con `uv`, trae torch desde el índice CPU de PyTorch (el
@@ -1058,15 +1058,19 @@ saltearían, y CI pasaría en verde sin haber ejercitado el OCR de PDFs ni la ar
 de `extract_pdf`, que es el camino que recuperó los 32 PDFs que extrajeron CERO
 caracteres.
 
-Que la lista alcanza se verificó sin pushear: un plugin de pytest instala un
+Que la lista alcanza se verificó primero sin pushear: un plugin de pytest instala un
 `MetaPathFinder` que levanta `ModuleNotFoundError` para los paquetes que el runner no
 instala, y con eso la suite da **1056 pasando y 1 salteado** —el salteado es local, este
 Windows no deja crear symlinks sin privilegios, así que en Linux deberían correr los
 1057—. Ningún test se saltea por falta de paquetes.
 
-Falta un paso, y es de Ilan: **`git push`**. El workflow está commiteado desde `1446b9b`
-pero nunca se subió, así que GitHub todavía no lo ejecutó. Hasta que no se pushee, lo de
-arriba es una simulación local, no una corrida verde de verdad.
+Y la simulación acertó. El workflow estuvo commiteado desde `1446b9b` sin subirse
+durante dos días; el push salió el **18/11 a las 12:50** con 75 commits
+(`46b277b..d0e3558`) y GitHub lo corrió por primera vez: **verde**, 56 segundos,
+`ruff: All checks passed!` y **1057 passed in 26.21s** —los 1057 exactos que el
+`MetaPathFinder` había predicho, con el salteado de Windows corriendo en Linux—. O sea
+que `requirements-ci.txt` está completo: ningún test se saltea en el runner por falta de
+un paquete. La corrida: `gh run view 44307793181`.
 
 ---
 

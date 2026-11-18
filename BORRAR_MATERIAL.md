@@ -22,6 +22,30 @@ regenera cuando quieras con:
 .venv\Scripts\python.exe scripts/manifest.py
 ```
 
+## ¿Se puede borrar hoy? (estado al 18/11, 13:00)
+
+No todavía, y falta poco. De las 17.801 fuentes, **17.796 están cubiertas** y de
+las 5 que no, **una sola es contenido que se pierde**. Lo que falta para que
+borrar deje de perder algo recuperable:
+
+| Condición | Estado |
+|---|---|
+| Que el inventario no liste ningún `HUECO` | **Falta 1**: `4 Hablarle a una chica del trabajo, sexualiza.mp4` (0,91 GB). Necesita tu `untrunc` (abajo), o tu decisión de dejar la clase afuera |
+| Que la re-destilación con Ollama termine | **En curso**: 8544 de 8823 extracciones. Termina alrededor del 20/11 a la noche |
+| Que el índice se reconstruya y la app lo sirva | **Falta**: `kb.index --reset` + `flyctl deploy` cuando la extracción cierre |
+| Que el inventario se regenere y confirme lo anterior | **Falta**: `scripts/manifest.py`, después del índice |
+
+Las tres últimas **no necesitan el material crudo**: la extracción corre sobre
+`transcripts/`, el índice sobre `extracted/`, y el inventario solo lee tamaños y
+duraciones. O sea que el único motivo real para no borrar hoy es el primero: el
+video truncado, y las dos pérdidas permanentes que no son un archivo —la
+posibilidad de re-transcribir con un modelo mejor, y todo lo visual—. Las dos
+están explicadas abajo.
+
+Mientras eso siga abierto, **no se borra nada**. La recomendación es mover el
+material a un disco externo: conserva las tres opciones por el precio de un
+disco de 1 TB.
+
 ## Antes de borrar nada
 
 Hay cuatro cosas pendientes que todavía necesitan el material crudo. Hasta que
