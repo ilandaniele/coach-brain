@@ -132,26 +132,39 @@ Lo que **no** se pierde: el texto de todo lo ya transcripto, las extracciones,
 el OCR de las capturas y el índice que usa la app. Nada de eso necesita el
 material crudo para seguir funcionando ni para reconstruirse.
 
-## Los 6 archivos sin cubrir, uno por uno
+## Los 5 archivos sin cubrir, uno por uno
 
-Después de cerrar los huecos evitables, de 17.799 archivos y 360,50 GB solo
-quedan 6 archivos (4,34 GB) sin transcript ni OCR, y ninguno de los 6 es una
-pérdida nueva. Las imágenes quedaron en 8.964 de 8.964 cubiertas y los audios
-en 8.396 de 8.396. Los 6 son:
+Después de cerrar los huecos evitables, de 17.801 archivos y 360,50 GB solo
+quedan 5 archivos (0,91 GB) sin transcript ni OCR, y **uno solo es una pérdida
+real**. Las imágenes quedaron en 8.964 de 8.964 cubiertas y los audios en 8.396
+de 8.396.
 
-**1. Tres fallas de transcripción ya conocidas.**
+`INVENTARIO.md` ahora escribe el motivo al lado de cada uno, porque "sin
+cubrir" no significa lo mismo en todos los casos: un video grabado con el
+micrófono apagado no tiene habla que perder, y un transcript excluido a
+propósito tampoco es una pérdida. Solo los que dicen `HUECO` o `ilegible` son
+contenido que se va para siempre si se borra el crudo. Hoy hay uno.
+
+**1. La única pérdida real: un video truncado.**
 `4 Hablarle a una chica del trabajo, sexualiza.mp4` (0,91 GB) no tiene átomo
-`moov`: es una descarga truncada y no se puede decodificar (ver arriba).
-`00031653-VIDEO-2025-09-08-11-54-41.mp4` y
-`00033588-GIF-2025-10-03-00-26-43.mp4` son clips de WhatsApp; el segundo es un
-GIF sin pista de audio.
+`moov`: es una descarga truncada y `ffprobe` no puede ni abrir el contenedor
+(ver arriba). **Este es el archivo que no hay que borrar hasta haber corrido
+`untrunc`**, que es lo único que puede reconstruirle el índice.
 
-**2. Un video de 3,43 GB que en realidad sí está cubierto.**
+**2. Dos clips de WhatsApp sin pista de audio.**
+`00031653-VIDEO-2025-09-08-11-54-41.mp4` y
+`00033588-GIF-2025-10-03-00-26-43.mp4` no declaran ninguna pista de audio: uno
+es un GIF y el otro se grabó con el micrófono apagado. No hay habla que
+transcribir, así que no figuran como hueco. El inventario lo comprueba con
+`ffprobe` cada vez que se regenera, no lo da por sabido.
+
+**2b. El video de 3,43 GB que parecía faltar ya no aparece en la lista.**
 `data\raw\docs\78 que es el valor.mp4` no matchea ningún transcript por
 nombre, pero existe `video_78 que es el valor-008.json`, hecho sobre
 `78 que es el valor-008.mp4`: es la misma clase en otra copia, con otro
-sufijo de descarga. El contenido está. Lo mismo pasa al revés con los 6
-transcripts "huérfanos" que lista `INVENTARIO.md`: son versiones viejas de
+sufijo de descarga. `scripts/manifest.py` ahora lo resuelve solo, comparando
+duraciones con `ffprobe` (7154,8 s en los dos). Lo mismo pasa al revés con los
+transcripts "huérfanos" que listaba `INVENTARIO.md`: son versiones viejas de
 clases que después se volvieron a descargar con otro sufijo
 (`36 Clase vip-029` contra `36 Clase vip-095` en disco, por ejemplo). No son
 una pérdida.

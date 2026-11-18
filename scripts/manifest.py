@@ -25,6 +25,7 @@ RAW = REPO / "data" / "raw"
 TRANSCRIPTS = REPO / "data" / "processed" / "transcripts"
 EXTRACTED = REPO / "data" / "processed" / "extracted"
 OCR = REPO / "data" / "processed" / "whatsapp_images_ocr"
+FUERA = REPO / "data" / "processed" / "_fuera_del_corpus"
 
 VIDEO_EXT = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".wmv", ".flv", ".m4v"}
 AUDIO_EXT = {".opus", ".m4a", ".mp3", ".ogg", ".wav", ".aac", ".oga"}
@@ -228,6 +229,82 @@ def match_por_duracion(hits, by_base, tol: float = 1.0) -> int:
     return n
 
 
+def _tiene_audio(path: str):
+    """True/False si el contenedor declara pista de audio, None si no se pudo leer.
+
+    None es informacion, no un error: un contenedor que ffprobe no puede abrir
+    esta roto, y eso es justamente lo que hay que distinguir de un archivo sano
+    que todavia no se transcribio.
+    """
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a",
+             "-show_entries", "stream=index", "-of", "csv=p=0", path],
+            capture_output=True, text=True, timeout=120,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0:
+        return None
+    return bool((r.stdout or "").strip())
+
+
+def _stems_fuera_del_corpus() -> set[str]:
+    """Stems de las fuentes cuyo transcript se movio a _fuera_del_corpus/.
+
+    Son exclusiones deliberadas (por ejemplo los CV de Ilan que llegaron por
+    WhatsApp): el material no es parte del corpus, asi que figurar como "sin
+    cubrir" es correcto pero NO es un hueco.
+    """
+    out: set[str] = set()
+    if not FUERA.exists():
+        return out
+    for p in FUERA.glob("*.json"):
+        stem = p.stem
+        # El transcript se llama "<tipo>_<stem de la fuente>".
+        for pref in ("pdf_", "docx_", "epub_", "video_", "audio_",
+                     "wa_video_", "wa_audio_", "whatsapp_"):
+            if stem.startswith(pref):
+                out.add(stem[len(pref):].lower())
+                break
+        else:
+            out.add(stem.lower())
+    return out
+
+
+def clasificar_sin_cubrir(rows) -> int:
+    """Anota en cada fila sin cubrir POR QUE lo esta. Devuelve los huecos reales.
+
+    El inventario es el registro sobre el que se decide si el material crudo se
+    puede borrar, asi que "sin cubrir" no puede ser una sola bolsa: un video
+    grabado con el microfono apagado no tiene habla que perder, y un transcript
+    excluido a proposito tampoco es una perdida. Mezclarlos con el archivo roto
+    que SI hay que recuperar hace que el registro no sirva para decidir.
+    """
+    fuera = _stems_fuera_del_corpus()
+    huecos = 0
+    for r in rows:
+        if r["cubierto"] != "NO":
+            r["motivo"] = ""
+            continue
+        stem = Path(r["path"]).stem.lower()
+        if stem in fuera:
+            r["motivo"] = "excluido a proposito (transcript en _fuera_del_corpus/)"
+            continue
+        if r["tipo"] in ("video", "audio"):
+            audio = _tiene_audio(r["path"])
+            if audio is False:
+                r["motivo"] = "sin pista de audio: no hay habla que transcribir"
+                continue
+            if audio is None:
+                r["motivo"] = "contenedor ilegible: ffprobe no lo puede abrir"
+                huecos += 1
+                continue
+        r["motivo"] = "HUECO: falta procesarlo"
+        huecos += 1
+    return huecos
+
+
 def gb(b: int) -> str:
     return "%.2f GB" % (b / 1024.0 ** 3)
 
@@ -288,10 +365,12 @@ def main() -> None:
             }
         )
 
+    n_huecos = clasificar_sin_cubrir(rows)
+
     out_csv = REPO / "data" / "processed" / "manifest_fuentes.csv"
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     cols = [
-        "path", "tipo", "ext", "bytes", "cubierto", "via",
+        "path", "tipo", "ext", "bytes", "cubierto", "via", "motivo",
         "transcript", "chars", "extraido", "items",
     ]
     with out_csv.open("w", encoding="utf-8", newline="") as fh:
@@ -329,11 +408,20 @@ def main() -> None:
     L.append("")
     L.append("## Archivos SIN cubrir")
     L.append("")
-    L.append("Estos no tienen transcript ni OCR. Si se borra el material crudo, su")
-    L.append("contenido se pierde y no hay forma de recuperarlo.")
+    L.append("Estos no tienen transcript ni OCR. El motivo de cada uno esta al lado,")
+    L.append("y es lo que decide si borrar el crudo pierde algo: un video sin pista de")
+    L.append("audio no tiene habla que perder, y un transcript excluido a proposito")
+    L.append("tampoco es una perdida. Solo los marcados `HUECO` o `ilegible` son")
+    L.append("contenido que se pierde sin forma de recuperarlo.")
     L.append("")
     if sin_cubrir:
-        L.append("**%d archivos, %s**" % (len(sin_cubrir), gb(sum(max(0, r["bytes"]) for r in sin_cubrir))))
+        L.append("**%d archivos, %s — de los cuales %d %s hueco%s real%s**"
+                 % (len(sin_cubrir),
+                    gb(sum(max(0, r["bytes"]) for r in sin_cubrir)),
+                    n_huecos,
+                    "es" if n_huecos == 1 else "son",
+                    "" if n_huecos == 1 else "s",
+                    "" if n_huecos == 1 else "es"))
         if n_dur:
             L.append("")
             L.append("(%d archivo(s) mas matchearon por duracion: estan "
@@ -342,7 +430,8 @@ def main() -> None:
                      "Columna `via` del CSV.)" % n_dur)
         L.append("")
         for r in sorted(sin_cubrir, key=lambda r: -max(0, r["bytes"]))[:200]:
-            L.append("- `%s` (%s, %s)" % (r["path"], gb(max(0, r["bytes"])), r["tipo"]))
+            L.append("- `%s` (%s, %s) — %s" % (
+                r["path"], gb(max(0, r["bytes"])), r["tipo"], r.get("motivo", "")))
         if len(sin_cubrir) > 200:
             L.append("- ... y %d mas, ver el CSV" % (len(sin_cubrir) - 200))
     else:
@@ -397,7 +486,7 @@ def main() -> None:
     L.append("")
     (REPO / "INVENTARIO.md").write_text("\n".join(L) + "\n", encoding="utf-8")
     print("Escrito %s" % (REPO / "INVENTARIO.md"))
-    print("Sin cubrir: %d archivos" % len(sin_cubrir))
+    print("Sin cubrir: %d archivos (%d huecos reales)" % (len(sin_cubrir), n_huecos))
 
 
 if __name__ == "__main__":
