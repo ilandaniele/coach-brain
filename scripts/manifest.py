@@ -246,6 +246,8 @@ def match_por_duracion(hits, by_base, tol: float = 1.0) -> int:
           % (len(pend), len(sueltos)))
     n = 0
     for h in pend:
+        if not sueltos:
+            break  # ya se repartieron todos: lo que queda sin cubrir no tiene con que matchear
         d = _dur_ffprobe(h[0]["path"])
         if d is None:
             continue
