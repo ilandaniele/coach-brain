@@ -113,6 +113,11 @@ def todo_bien(mod, monkeypatch, *, paquetes=("pypdf",), cuda=True, api_key="sk-a
             get_collections=lambda: SimpleNamespace(collections=[1, 2, 3])
         ),
     )
+    # El `close_qdrant` real mira el cache del proceso, que es compartido con el
+    # resto de la sesión de pytest: si otro test dejó un cliente ahí, este lo
+    # cerraría. Los dos tests que miran el cierre lo re-parchean con un
+    # anotador.
+    monkeypatch.setattr(I, "close_qdrant", lambda: None)
     return anth
 
 
@@ -169,6 +174,45 @@ def test_con_cuda_reporta_la_placa(smoke, monkeypatch, capsys):
     todo_bien(smoke, monkeypatch)
     smoke.main()
     assert "RTX 5070 Ti" in capsys.readouterr().out
+
+
+def test_el_check_de_qdrant_cierra_el_cliente(smoke, monkeypatch, capsys):
+    """`get_qdrant()` cachea el cliente, así que sin un cierre explícito el
+    cliente llega vivo al apagado del intérprete y `QdrantClient.__del__`
+    importa `portalocker` con `sys.meta_path` ya en None: el script imprimía
+    cinco líneas de "Exception ignored in" después de decir que todo estaba en
+    orden."""
+    import coach_brain.kb.index as I
+
+    todo_bien(smoke, monkeypatch)
+    cierres: list[int] = []
+    monkeypatch.setattr(I, "close_qdrant", lambda: cierres.append(1))
+
+    assert smoke.main() == 0
+
+    assert cierres == [1], "el chequeo de Qdrant no cerró el cliente"
+
+
+def test_si_qdrant_falla_el_cliente_se_cierra_igual(smoke, monkeypatch, capsys):
+    """De ahí el `finally`: justo cuando Qdrant falla —otro proceso con el file
+    lock, gotcha #11— es cuando conviene soltar lo que se abrió."""
+    import coach_brain.kb.index as I
+
+    todo_bien(smoke, monkeypatch)
+
+    def explota():
+        raise RuntimeError("otro proceso tiene el lock")
+
+    monkeypatch.setattr(
+        I, "get_qdrant", lambda: SimpleNamespace(get_collections=explota)
+    )
+    cierres: list[int] = []
+    monkeypatch.setattr(I, "close_qdrant", lambda: cierres.append(1))
+
+    assert smoke.main() == 1
+
+    assert cierres == [1], "el cliente quedó abierto cuando el chequeo falló"
+    assert "otro proceso tiene el lock" in capsys.readouterr().out
 
 
 def test_el_ping_usa_el_modelo_barato(smoke, monkeypatch, capsys):

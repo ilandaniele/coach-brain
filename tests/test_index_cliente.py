@@ -16,11 +16,16 @@ si se rompen en silencio:
    el `mkdir` de la rama local recibiría una ruta vacía. En Fly.io eso sería un
    crash en el arranque.
 
+4. **El cierre es explícito.** `close_qdrant()` existe porque el cache hace
+   que el cliente viva hasta que se apaga el intérprete, y ahí el `__del__` de
+   `QdrantClient` importa `portalocker` con `sys.meta_path` ya en None: un
+   script que terminó bien imprime cinco líneas de traceback igual.
+
 Además se fija que un `--reset` sobre un Qdrant vacío no aborta: en el primer
 deploy las tres colecciones todavía no existen y `delete_collection` falla.
 
 No se abre Qdrant real: `QdrantClient` se reemplaza por un doble que anota con
-qué argumentos lo llamaron.
+qué argumentos lo llamaron y si lo cerraron.
 """
 
 from __future__ import annotations
@@ -35,10 +40,15 @@ from coach_brain.settings import settings
 
 
 class ClienteFalso:
-    """Anota los kwargs de construcción. Es lo único que se quiere observar."""
+    """Anota los kwargs de construcción y si lo cerraron. Es lo único que se
+    quiere observar."""
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs
+        self.cerrado = False
+
+    def close(self):
+        self.cerrado = True
 
 
 @pytest.fixture(autouse=True)
@@ -90,6 +100,43 @@ def test_el_cache_guarda_uno_solo():
     """`maxsize=1`: si creciera, un cambio de `QDRANT_URL` en caliente dejaría
     dos clientes vivos sobre el mismo storage, y el segundo no consigue el lock."""
     assert I._get_qdrant_cached.cache_info().maxsize == 1
+
+
+# --- el cierre --------------------------------------------------------------
+
+
+def test_close_qdrant_cierra_el_cliente_y_vacia_el_cache(local, construcciones):
+    """Lo que arregla: un script que llama a `get_qdrant()` deja el cliente en
+    el cache, y al apagarse el intérprete `QdrantClient.__del__` intenta
+    `import portalocker` con `sys.meta_path` ya en None. El script termina bien
+    e igual imprime cinco líneas de traceback."""
+    cliente = I.get_qdrant()
+
+    I.close_qdrant()
+
+    assert cliente.cerrado, "no se cerró el cliente que estaba cacheado"
+    assert I._get_qdrant_cached.cache_info().currsize == 0
+
+
+def test_close_qdrant_sin_cliente_no_construye_uno_para_cerrarlo(local, construcciones):
+    """`_get_qdrant_cached()` a secas construiría el cliente que se quiere
+    cerrar: en modo embebido son 399 MB a numpy y el file lock del directorio.
+    De ahí la guarda por `currsize`."""
+    I.close_qdrant()
+
+    assert construcciones == []
+
+
+def test_despues_de_cerrar_la_proxima_llamada_construye_de_nuevo(local, construcciones):
+    """El cache queda vacío, no con un cliente cerrado adentro: devolver uno
+    cerrado haría fallar la consulta siguiente."""
+    primero = I.get_qdrant()
+    I.close_qdrant()
+    segundo = I.get_qdrant()
+
+    assert segundo is not primero
+    assert len(construcciones) == 2
+    assert not segundo.cerrado
 
 
 # --- el mutex (gotcha #11) --------------------------------------------------

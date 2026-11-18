@@ -60,6 +60,30 @@ def _get_qdrant_cached() -> QdrantClient:
     return QdrantClient(path=str(storage))
 
 
+def close_qdrant() -> None:
+    """Cierra el cliente cacheado y vacía el cache. Sin esto un script sano
+    termina con un traceback a la vista.
+
+    `get_qdrant()` cachea el cliente, así que en un script el cliente sigue vivo
+    hasta que el intérprete se apaga, y ahí lo cierra `QdrantClient.__del__`. A
+    esa altura `sys.meta_path` ya es None y `QdrantLocal.close()` hace
+    `import portalocker`: el import falla y Python imprime cinco líneas de
+    "Exception ignored in: <function QdrantClient.__del__>". No rompe nada, pero
+    un script que terminó bien no tiene que parecer que falló.
+
+    Cerrar a mano también suelta antes el file lock del modo embebido, que es de
+    un solo proceso (gotcha #11). El `__del__` posterior no cierra dos veces: se
+    corta solo al ver el `_flock_file` ya cerrado.
+
+    No sirve para reciclar el cliente en pleno uso: el próximo `get_qdrant()`
+    reconstruye, y en modo embebido eso son 399 MB de vectores a numpy otra vez.
+    """
+    with _QDRANT_LOCK:
+        if _get_qdrant_cached.cache_info().currsize:
+            _get_qdrant_cached().close()
+            _get_qdrant_cached.cache_clear()
+
+
 def ensure_collection(client: QdrantClient, name: str, dim: int) -> None:
     """Crea la colección si no existe."""
     try:

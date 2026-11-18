@@ -111,10 +111,17 @@ def main() -> int:
 
     # 7. Qdrant local
     def _qdrant():
-        from coach_brain.kb.index import get_qdrant
+        from coach_brain.kb.index import close_qdrant, get_qdrant
 
+        # El cierre es explícito a propósito: get_qdrant() cachea el cliente, y
+        # si se lo deja al __del__ del intérprete el script termina imprimiendo
+        # cinco líneas de "Exception ignored in" (ver close_qdrant). Va en
+        # finally para que también cierre cuando get_collections() falle.
         client = get_qdrant()
-        collections = client.get_collections()
+        try:
+            collections = client.get_collections()
+        finally:
+            close_qdrant()
         return f"qdrant ok, collections={len(collections.collections)}"
 
     results.append(("Qdrant", *check("qdrant", _qdrant)))

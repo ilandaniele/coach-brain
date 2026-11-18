@@ -32,7 +32,7 @@ Overview y setup en `README.md`. Este archivo es el estado operativo y los gotch
 | Qdrant | OK (local embebido) | persiste en `./qdrant_storage/` |
 | Material del coach | OK | **`C:\Users\Ilan\Desktop\Ilan\Seduccion`** (360GB) — las tres junctions de `data/raw` apuntan ahi y resuelven bien; ver gotcha #7 |
 | Deploy Fly.io | OK | app `coach-brain-ilan`, región `iad`, 4GB / 2 vCPU shared, siempre prendida |
-| Tests | OK | **1051 pasando + 1 salteado** en 37 archivos: `.venv\Scripts\python.exe -m pytest tests/ -q`, ~20 s, sin GPU ni red. Cobertura **100 % con ramas** sobre `src/coach_brain`, con el piso puesto en `fail_under = 100` en `pyproject.toml`; CI no la mide (pytest-cov no está en `requirements-ci.txt`), la sostiene la corrida local `python -m coverage run -m pytest -q && python -m coverage report`. Además `scripts\smoke_test.py --quick` |
+| Tests | OK | **1056 pasando + 1 salteado** en 37 archivos: `.venv\Scripts\python.exe -m pytest tests/ -q`, ~20 s, sin GPU ni red. Cobertura **100 % con ramas** sobre `src/coach_brain`, con el piso puesto en `fail_under = 100` en `pyproject.toml`; CI no la mide (pytest-cov no está en `requirements-ci.txt`), la sostiene la corrida local `python -m coverage run -m pytest -q && python -m coverage report`. Además `scripts\smoke_test.py --quick` |
 | CI (GitHub Actions) | Escrito, sin pushear | `.github/workflows/ci.yml`: ruff + la suite completa en un runner Linux sin GPU, con `requirements-ci.txt` + torch del índice CPU. Verificado localmente simulando el runner; falta `git push` (ver más abajo) |
 
 ---
@@ -945,6 +945,37 @@ la corrida local:
 .venv\Scripts\python.exe -m coverage report
 ```
 
+### 31. Un script que termina bien y escupe un traceback igual
+
+`scripts/smoke_test.py --quick` imprimía su tabla, decía `1 check(s) fallaron`
+—el ping a Anthropic, que es por saldo— y después tiraba cinco líneas de esto:
+
+```
+Exception ignored in: <function QdrantClient.__del__ at 0x...>
+Traceback (most recent call last):
+  File "...\qdrant_client\qdrant_client.py", line 169, in __del__
+  File "...\qdrant_client\local\qdrant_local.py", line 85, in close
+ImportError: sys.meta_path is None, Python is likely shutting down
+```
+
+No era un error del script. `get_qdrant()` cachea el cliente en un `lru_cache`,
+así que nadie lo cierra y el cliente llega vivo al apagado del intérprete. Ahí
+corre `QdrantClient.__del__`, que llama a `close()`, que hace
+`import portalocker` para soltar el file lock del modo embebido —y a esa altura
+`sys.meta_path` ya es `None`, así que el import falla. Python no puede propagar
+una excepción desde un `__del__`: la imprime y sigue.
+
+El arreglo es cerrar a mano, no tragarse el mensaje: `kb.index.close_qdrant()`
+cierra el cliente cacheado y vacía el cache, y el chequeo de Qdrant lo llama en
+un `finally`. El `__del__` posterior ya no cierra dos veces, porque se corta
+solo al ver el `_flock_file` cerrado. De paso suelta antes el lock, que es de un
+solo proceso (gotcha #11).
+
+Por qué importa más allá de la estética: lo que se lee de un smoke test es la
+última línea. Un traceback ahí abajo manda a buscar un problema que no existe, y
+—peor— entrena a saltearse los tracebacks de ese script. Cualquier script que
+abra Qdrant y no lo cierre tiene el mismo final.
+
 ## Costos reales
 
 | Etapa | Costo |
@@ -1001,7 +1032,7 @@ coach-brain/
 │   ├── escanear_corpus.py    ← pasa ese detector por el corpus vivo; solo lee
 │   ├── reparar_source_path.py    ← reescribe los source_path muertos (gotcha #26)
 │   └── resume, status, watch, transcribe_batches, smoke_test, upload_to_qdrant_cloud
-├── tests/                    ← 1051 tests (+1 salteado) en 37 archivos; `python -m pytest tests/ -q`
+├── tests/                    ← 1056 tests (+1 salteado) en 37 archivos; `python -m pytest tests/ -q`
 ├── logs/                     ← UTF-16 (gotcha #5)
 └── qdrant_storage/           ← 38.343 vectores — IRREMPLAZABLE sin re-correr todo
 ```
@@ -1029,9 +1060,9 @@ caracteres.
 
 Que la lista alcanza se verificó sin pushear: un plugin de pytest instala un
 `MetaPathFinder` que levanta `ModuleNotFoundError` para los paquetes que el runner no
-instala, y con eso la suite da **1051 pasando y 1 salteado** —el salteado es local, este
+instala, y con eso la suite da **1056 pasando y 1 salteado** —el salteado es local, este
 Windows no deja crear symlinks sin privilegios, así que en Linux deberían correr los
-1052—. Ningún test se saltea por falta de paquetes.
+1057—. Ningún test se saltea por falta de paquetes.
 
 Falta un paso, y es de Ilan: **`git push`**. El workflow está commiteado desde `1446b9b`
 pero nunca se subió, así que GitHub todavía no lo ejecutó. Hasta que no se pushee, lo de
@@ -1051,7 +1082,7 @@ arriba es una simulación local, no una corrida verde de verdad.
    disco externo en lugar de borrarlo, para no perder la opción de re-transcribir.
 4. **Curación manual** — `data/curated/` sigue vacío. La idea era revisar a mano los
    principios extraídos antes de indexar; nunca se hizo. ¿Vale la pena a esta altura?
-5. **Tests** — ya no está vacío: **1051 pasando y 1 salteado** en 37 archivos
+5. **Tests** — ya no está vacío: **1056 pasando y 1 salteado** en 37 archivos
    (`.venv\Scripts\python.exe -m pytest tests/ -q`). Cubren los umbrales del
    verificador, los cuatro motivos de "sin cubrir", el criterio de duplicado, a quién
    manda a re-transcribir la auditoría sin VAD, su detector de alucinaciones con sus
