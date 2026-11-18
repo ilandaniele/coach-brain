@@ -355,10 +355,16 @@ mucho**, así que ahí solo vale leído junto al otro.
 **Sacar o re-transcribir cualquier transcript vivo cambia lo que devuelve el
 índice, así que lo decide Ilan**, igual que la promoción de un resultado sin
 VAD. El escaneo vive en `scripts/escanear_corpus.py`, importa el criterio de la
-auditoría en vez de copiarlo, y **no escribe nada**: no está en `finalize.ps1`
-y se puede correr cuando sea. 6 tests, cuatro de ellos sobre el recorrido y no
-sobre la detección (que no escriba, que un transcript vacío no cuente como
-alucinación, que un JSON roto no corte la corrida).
+auditoría en vez de copiarlo, y **no escribe nada**, así que se puede correr
+cuando sea. 6 tests, cuatro de ellos sobre el recorrido y no sobre la detección
+(que no escriba, que un transcript vacío no cuente como alucinación, que un
+JSON roto no corte la corrida).
+
+**Es el paso 6 de `finalize.ps1`**, de solo lectura y sin abortar. Está ahí y no
+solo documentado porque un informe que nadie corre no existe: es el mismo
+defecto que tenía el staging sin VAD, que era seguro justamente porque nada lo
+leía. Va después de `--juzgar` y antes del re-index, que es el momento en que
+una persona decide a mano qué entra y qué sale del índice.
 
 ```powershell
 .venv\Scripts\python.exe -I -X utf8 scripts/retranscribir_sin_vad.py --listar
@@ -747,7 +753,7 @@ duración igual**. Los dos pedazos hacen falta:
 ### 27. `os.walk` sobre una ruta que no se puede recorrer devuelve cero archivos
 
 No levanta excepción: no encuentra nada. `scripts/manifest.py` recorre el
-material así, y desde que es el paso 7 de `finalize.ps1` corre **solo**,
+material así, y desde que es el paso 8 de `finalize.ps1` corre **solo**,
 sobrescribiendo `INVENTARIO.md`. Con las junctions de `data/raw` apuntando a
 una carpeta movida o a un disco desconectado, ese paso escribiría un
 inventario que dice que en disco no hay material — exactamente lo que alguien
@@ -840,7 +846,7 @@ coach-brain/
 │   ├── situational_lines.md  ← prompt del tab Líneas
 │   └── extractor.md          ← prompt para destilar transcripts
 ├── scripts/
-│   ├── finalize.ps1          ← los 8 pasos que faltan, en orden; se niega a correr con el pipeline vivo
+│   ├── finalize.ps1          ← los 9 pasos que faltan, en orden; se niega a correr con el pipeline vivo
 │   ├── verificar.py          ← el verificador: huecos, duplicados, pendientes sin VAD
 │   ├── manifest.py           ← escribe INVENTARIO.md y el CSV; aborta si el disco no se pudo recorrer
 │   ├── retranscribir_sin_vad.py  ← la auditoria sin VAD y el detector de alucinaciones
