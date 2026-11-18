@@ -8,6 +8,12 @@ Sirve para decidir que material crudo se puede borrar sin perder nada que el
 pipeline todavia necesite. Solo lee: no borra ni mueve nada.
 
 Uso:  .venv\\Scripts\\python.exe scripts/manifest.py
+
+Se niega a escribir si en disco aparecen menos archivos que transcripts:
+eso solo pasa si el material no se pudo recorrer. Para generarlo igual
+(por ejemplo despues de un borrado autorizado de verdad):
+
+      .venv\\Scripts\\python.exe scripts/manifest.py --sin-piso
 """
 
 from __future__ import annotations
@@ -18,6 +24,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -353,6 +360,42 @@ def gb(b: int) -> str:
     return "%.2f GB" % (b / 1024.0 ** 3)
 
 
+def exigir_piso(n_disk: int, n_ts: int, argv=None) -> None:
+    """Corta la corrida si el recorrido del disco no trajo lo que deberia.
+
+    `os.walk` sobre una ruta que no se puede recorrer no falla: no devuelve
+    nada. Con las junctions de `data/raw` apuntando a una carpeta movida o a un
+    disco desconectado, el inventario saldria diciendo que en disco no hay
+    material, y este script SOBRESCRIBE INVENTARIO.md, que es el registro con
+    el que se decide que material se puede borrar. Un inventario vacio es peor
+    que ninguno: dice exactamente lo que alguien querria leer antes de borrar.
+
+    El piso sale de un invariante, no de una calibracion: cada transcript lo
+    produjo un archivo fuente, asi que en disco no puede haber menos archivos
+    que transcripts. Hoy son 17801 contra 8838, asi que el margen es amplio y
+    solo salta cuando algo se rompio de verdad.
+
+    `--sin-piso` lo desactiva, para el caso en que el material se haya borrado
+    a proposito y se quiera un inventario que lo refleje.
+    """
+    if argv is None:
+        argv = sys.argv
+    if "--sin-piso" in argv:
+        return
+    if n_disk >= n_ts:
+        return
+    raise SystemExit(
+        "ABORTADO: %d archivos en disco para %d transcripts.\n"
+        "Cada transcript salio de un archivo, asi que esto no puede pasar"
+        " salvo que el material no se haya podido recorrer.\n"
+        "Revisa que %s tenga el material a la vista: las junctions de"
+        " data/raw apuntan a la carpeta donde esta.\n"
+        "No se escribio nada, ni el CSV ni INVENTARIO.md: el inventario que"
+        " hay sigue siendo el de antes.\n"
+        "Si el material se borro a proposito, volve a correr con --sin-piso."
+        % (n_disk, n_ts, RAW))
+
+
 def main() -> None:
     print("Leyendo transcripts...")
     by_src, by_base, huerfanos = load_transcripts()
@@ -363,6 +406,8 @@ def main() -> None:
     print("Recorriendo material crudo (son cientos de GB, puede tardar)...")
     disk, ignorados = scan_disk()
     print("  %d archivos fuente en disco" % len(disk))
+
+    exigir_piso(len(disk), len(list(TRANSCRIPTS.glob("*.json"))))
 
     ocr = ocr_coverage()
 
