@@ -32,7 +32,7 @@ Overview y setup en `README.md`. Este archivo es el estado operativo y los gotch
 | Qdrant | OK (local embebido) | persiste en `./qdrant_storage/` |
 | Material del coach | OK | **`C:\Users\Ilan\Desktop\Ilan\Seduccion`** (360GB) — las tres junctions de `data/raw` apuntan ahi y resuelven bien; ver gotcha #7 |
 | Deploy Fly.io | OK | app `coach-brain-ilan`, región `iad`, 4GB / 2 vCPU shared, siempre prendida |
-| Tests | OK | **1041 pasando + 1 salteado** en 37 archivos: `.venv\Scripts\python.exe -m pytest tests/ -q`, ~20 s, sin GPU ni red. Cobertura 99 % sobre `src/coach_brain`. Además `scripts\smoke_test.py --quick` |
+| Tests | OK | **1051 pasando + 1 salteado** en 37 archivos: `.venv\Scripts\python.exe -m pytest tests/ -q`, ~20 s, sin GPU ni red. Cobertura **100 % con ramas** sobre `src/coach_brain`, con el piso puesto en `fail_under = 100` en `pyproject.toml`; CI no la mide (pytest-cov no está en `requirements-ci.txt`), la sostiene la corrida local `python -m coverage run -m pytest -q && python -m coverage report`. Además `scripts\smoke_test.py --quick` |
 | CI (GitHub Actions) | Escrito, sin pushear | `.github/workflows/ci.yml`: ruff + la suite completa en un runner Linux sin GPU, con `requirements-ci.txt` + torch del índice CPU. Verificado localmente simulando el runner; falta `git push` (ver más abajo) |
 
 ---
@@ -884,6 +884,49 @@ Queda una decisión que no es de código: `data/processed/whatsapp_images/` son
 13 MB de resultados de una corrida abandonada que ya no alimentan nada. Borrarlos
 o dejarlos como registro es decisión de Ilan.
 
+### 30. Cobertura de líneas al 100 % con diez ramas sin probar
+
+Hasta el 18-11 el repo no tenía configuración de cobertura: ni sección
+`[tool.coverage]` en `pyproject.toml` ni `.coveragerc`. Sólo estaba el archivo de
+datos `.coverage`, así que cada corrida usaba los defaults de la versión instalada
+y el número no era comparable entre corridas.
+
+Con los defaults, `coverage` mide **líneas**. El informe decía 99 %, y las 18
+líneas que faltaban eran 16 `if __name__ == "__main__":` —arranque, no lógica— más
+el fallback de `source_file` en `ingest/whatsapp_images_ocr.py`. Al prender
+`branch = true` aparecieron **diez ramas parciales** que la medición por líneas
+tapaba: cada una era una línea ejecutada por un solo lado del `if`. Las nueve
+reales eran comportamiento sin probar, no adorno:
+
+- una captura recortada al encabezado de WhatsApp (el barrido de la franja
+  superior se quedaba sin items en vez de cortar por el `break`);
+- un contacto guardado y todavía sin perfil, en los dos tabs: sin eso, el prompt
+  podía prometerle memoria de alguien a quien no conoce;
+- el Tab 2 con el RAG apagado (Qdrant caído o el lock tomado, gotcha #11);
+- un `.pptx` cuyos rels no nombran notas, que es el caso normal de casi toda
+  diapositiva;
+- un `.pptx` cuyos rels prometen un `notesSlideN.xml` que no está en el zip
+  (lo deja así PowerPoint cuando "repara" un archivo);
+- una diapositiva sin texto seguida de una con texto;
+- `kb.extract.run()` con backend Anthropic, que arma **un** cliente por corrida y
+  no uno por transcript: son 8838 archivos.
+
+La décima, la salida del `while` de `chunk_text`, es inalcanzable —el ciclo siempre
+corta por el `break`— y quedó marcada `# pragma: no branch` con la prueba al lado.
+
+Lo que importa de esto: **un 100 % de líneas no dice nada sobre las ramas**, y el
+informe sin `branch = true` no avisa. Ahora la configuración vive en
+`pyproject.toml` con `branch = true` y `fail_under = 100`, y los
+`if __name__ == "__main__":` están declarados fuera de alcance en `exclude_also`
+para que el porcentaje diga la verdad en vez de perdonar 16 líneas. CI **no** mide
+cobertura (pytest-cov no está en `requirements-ci.txt`), así que el piso lo sostiene
+la corrida local:
+
+```powershell
+.venv\Scripts\python.exe -m coverage run -m pytest -q
+.venv\Scripts\python.exe -m coverage report
+```
+
 ## Costos reales
 
 | Etapa | Costo |
@@ -940,7 +983,7 @@ coach-brain/
 │   ├── escanear_corpus.py    ← pasa ese detector por el corpus vivo; solo lee
 │   ├── reparar_source_path.py    ← reescribe los source_path muertos (gotcha #26)
 │   └── resume, status, watch, transcribe_batches, smoke_test, upload_to_qdrant_cloud
-├── tests/                    ← 1041 tests (+1 salteado) en 37 archivos; `python -m pytest tests/ -q`
+├── tests/                    ← 1051 tests (+1 salteado) en 37 archivos; `python -m pytest tests/ -q`
 ├── logs/                     ← UTF-16 (gotcha #5)
 └── qdrant_storage/           ← 38.343 vectores — IRREMPLAZABLE sin re-correr todo
 ```
@@ -968,9 +1011,9 @@ caracteres.
 
 Que la lista alcanza se verificó sin pushear: un plugin de pytest instala un
 `MetaPathFinder` que levanta `ModuleNotFoundError` para los paquetes que el runner no
-instala, y con eso la suite da **1041 pasando y 1 salteado** —el salteado es local, este
+instala, y con eso la suite da **1051 pasando y 1 salteado** —el salteado es local, este
 Windows no deja crear symlinks sin privilegios, así que en Linux deberían correr los
-1042—. Ningún test se saltea por falta de paquetes.
+1052—. Ningún test se saltea por falta de paquetes.
 
 Falta un paso, y es de Ilan: **`git push`**. El workflow está commiteado desde `1446b9b`
 pero nunca se subió, así que GitHub todavía no lo ejecutó. Hasta que no se pushee, lo de
@@ -990,7 +1033,7 @@ arriba es una simulación local, no una corrida verde de verdad.
    disco externo en lugar de borrarlo, para no perder la opción de re-transcribir.
 4. **Curación manual** — `data/curated/` sigue vacío. La idea era revisar a mano los
    principios extraídos antes de indexar; nunca se hizo. ¿Vale la pena a esta altura?
-5. **Tests** — ya no está vacío: **1041 pasando y 1 salteado** en 37 archivos
+5. **Tests** — ya no está vacío: **1051 pasando y 1 salteado** en 37 archivos
    (`.venv\Scripts\python.exe -m pytest tests/ -q`). Cubren los umbrales del
    verificador, los cuatro motivos de "sin cubrir", el criterio de duplicado, a quién
    manda a re-transcribir la auditoría sin VAD, su detector de alucinaciones con sus
