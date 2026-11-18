@@ -9,6 +9,10 @@ sin VAD — sino tres propiedades del recorrido:
    vacíos como basura sería ruido que tapa los 4 que importan.
 3. Un JSON ilegible no corta la corrida. Es un problema distinto, del
    verificador, y abortar acá dejaría el corpus sin escanear por un archivo.
+4. "Sin extraer" no es "0 items". El índice se arma desde `extracted/`, así que
+   0 items significa que el extractor filtró ese transcript y que no aportó un
+   vector; que no haya extracción significa que todavía no se sabe. Tratarlos
+   igual haría que el reporte diera por limpio algo que nadie miró.
 """
 
 from __future__ import annotations
@@ -94,3 +98,45 @@ def test_el_criterio_es_el_mismo_que_la_auditoria():
 
 def test_directorio_vacio_no_falla(tmp_path):
     assert M.escanear(tmp_path) == (0, [], [])
+
+
+# --- items extraidos: la diferencia entre basura en el corpus y en el índice --
+
+
+def _extraccion(d: Path, stem: str, **items) -> Path:
+    p = d / (stem + ".extracted.json")
+    cuerpo = {"principios": [], "situaciones": [], "frases": []}
+    cuerpo.update(items)
+    p.write_text(json.dumps(cuerpo, ensure_ascii=False), encoding="utf-8")
+    return p
+
+
+def test_sin_extraccion_no_es_cero(tmp_path):
+    """None y 0 contestan cosas distintas.
+
+    0 es "el extractor lo miró y no sacó nada": no aportó un solo vector, no
+    hay nada que sacar del índice. None es "la etapa todavía no pasó por ahí":
+    la respuesta no se sabe. Confundirlos haría que un transcript sin extraer
+    pase por filtrado.
+    """
+    assert M.items_extraidos("no_existe", tmp_path) is None
+    _extraccion(tmp_path, "vacia")
+    assert M.items_extraidos("vacia", tmp_path) == 0
+
+
+def test_cuenta_los_items_de_las_tres_colecciones(tmp_path):
+    _extraccion(tmp_path, "algo", principios=["a", "b"], frases=["c"])
+    assert M.items_extraidos("algo", tmp_path) == 3
+
+
+def test_una_extraccion_rota_no_se_cuenta_como_cero(tmp_path):
+    """Un JSON ilegible es desconocido, no filtrado: si se contara como 0, el
+    reporte diría que no llegó al índice sin haberlo podido leer."""
+    (tmp_path / "roto.extracted.json").write_text("{", encoding="utf-8")
+    assert M.items_extraidos("roto", tmp_path) is None
+
+
+def test_la_etiqueta_distingue_los_tres_casos():
+    assert M._etiqueta_items(None) == "sin extraer"
+    assert M._etiqueta_items(0) == "0 items"
+    assert M._etiqueta_items(3) == "3 items"

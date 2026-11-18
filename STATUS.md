@@ -332,20 +332,32 @@ revisar, los 3 que parecen habla de verdad no juntan ninguno.
 **El detector corrido sobre el corpus vivo.** Que el detector exista para la
 auditoría sin VAD no significa que el corpus con VAD esté limpio: el transcript
 **con VAD** de `wa_audio_00021896` son 1.907 caracteres de `"¡Gracias por ver
-el video!"` repetido 25 veces, así que esa alucinación ya está indexada. Corrido
-sobre los 8.838 transcripts vivos (solo lectura, sin tocar nada):
+el video!"` repetido 25 veces. Corrido sobre los 8.838 transcripts vivos (solo
+lectura, sin tocar nada):
 
 | | |
 |---|---|
 | Marcados como alucinación | **4**, 36 caracteres en total |
+| De esos, con items en el índice | **0** |
 | Con aviso pero no marcados | **36** |
 
 Los 4 marcados son transcripts de 8 a 12 caracteres (`"Gracias."` tres veces,
-`"¡Suscríbete!"` una): ruido que el VAD dejó pasar, intrascendente para lo que
-devuelve el índice.
+`"¡Suscríbete!"` una): ruido que el VAD dejó pasar.
+
+**Un transcript alucinado no llega al índice por sí solo**, y eso cambia qué
+hay que leer del informe. Las 3 colecciones se arman desde `extracted/`: un
+transcript entra al índice únicamente a través de los items que el extractor
+sacó de él. Los 4 marcados extrajeron **0 items** — el extractor ya los
+filtró, no aportaron un solo vector, no hay nada que sacar. Por eso el reporte
+imprime los items al lado de cada marcado, y `0 items` no es lo mismo que `sin
+extraer`: lo segundo significa que la etapa todavía no pasó por ahí y que la
+respuesta no se sabe. `wa_audio_00021896` está hoy en ese estado, porque su
+extracción se movió a `_reextraer/` y la corrida con Ollama todavía no llegó.
 
 De los 36 avisados, **uno solo junta las dos señales**: `wa_audio_00021896`,
-33 % de cobertura y 33 % de frases inventadas. Los otros 35 son notas de voz
+33 % de cobertura y 33 % de frases inventadas. Veinte de los 36 tienen items
+extraídos, y eso no los vuelve basura: son notas de voz reales en las que
+alguien repite una frase. El aviso es una anotación, no un veredicto. Los otros 35 son notas de voz
 cortas donde una muletilla repetida tres o cuatro veces cubre más del 25 % del
 texto justamente porque el texto es corto — `"qué bonito"` seis veces en 256
 caracteres es alguien hablando, no el decoder en bucle. Eso acota para qué
@@ -356,9 +368,10 @@ mucho**, así que ahí solo vale leído junto al otro.
 índice, así que lo decide Ilan**, igual que la promoción de un resultado sin
 VAD. El escaneo vive en `scripts/escanear_corpus.py`, importa el criterio de la
 auditoría en vez de copiarlo, y **no escribe nada**, así que se puede correr
-cuando sea. 6 tests, cuatro de ellos sobre el recorrido y no sobre la detección
-(que no escriba, que un transcript vacío no cuente como alucinación, que un
-JSON roto no corte la corrida).
+cuando sea. 10 tests, ninguno sobre la detección: sobre el recorrido (que no
+escriba, que un transcript vacío no cuente como alucinación, que un JSON roto
+no corte la corrida) y sobre el conteo de items (que `sin extraer` no se cuente
+como 0, que una extracción ilegible tampoco).
 
 **Es el paso 6 de `finalize.ps1`**, de solo lectura y sin abortar. Está ahí y no
 solo documentado porque un informe que nadie corre no existe: es el mismo
@@ -853,7 +866,7 @@ coach-brain/
 │   ├── escanear_corpus.py    ← pasa ese detector por el corpus vivo; solo lee
 │   ├── reparar_source_path.py    ← reescribe los source_path muertos (gotcha #26)
 │   └── resume, status, watch, transcribe_batches, smoke_test, upload_to_qdrant_cloud
-├── tests/                    ← 138 tests en 13 archivos; `python -m pytest tests/ -q`
+├── tests/                    ← 142 tests en 13 archivos; `python -m pytest tests/ -q`
 ├── logs/                     ← UTF-16 (gotcha #5)
 └── qdrant_storage/           ← 38.343 vectores — IRREMPLAZABLE sin re-correr todo
 ```
@@ -872,7 +885,7 @@ coach-brain/
    disco externo en lugar de borrarlo, para no perder la opción de re-transcribir.
 4. **Curación manual** — `data/curated/` sigue vacío. La idea era revisar a mano los
    principios extraídos antes de indexar; nunca se hizo. ¿Vale la pena a esta altura?
-5. **Tests** — ya no está vacío: **138 tests pasando** en 13 archivos
+5. **Tests** — ya no está vacío: **142 tests pasando** en 13 archivos
    (`.venv\Scripts\python.exe -m pytest tests/ -q`). Cubren los umbrales del
    verificador, los cuatro motivos de "sin cubrir", el criterio de duplicado, a quién
    manda a re-transcribir la auditoría sin VAD, su detector de alucinaciones con sus

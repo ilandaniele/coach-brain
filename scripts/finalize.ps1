@@ -105,9 +105,11 @@ Write-Host "`n[5/9] Auditoria sin VAD (informe, no promueve nada)..." -Foregroun
 # 6) El mismo detector, sobre el corpus VIVO. Esta aca y no solo en la
 #    auditoria porque el corpus con VAD tampoco esta limpio: el transcript
 #    de wa_audio_00021896 son 1907 caracteres de "Gracias por ver el video"
-#    repetido 25 veces, y ya esta indexado. Solo lectura, no aborta: lo que
-#    se saque del corpus lo decide una persona que leyo el texto, y tiene
-#    que decidirlo ANTES del paso 7, que reconstruye el indice.
+#    repetido 25 veces. Lo que importa de ese informe es la columna de items:
+#    el indice se arma desde extracted\, asi que un marcado con 0 items ya lo
+#    filtro el extractor y no aporto ningun vector. Solo lectura, no aborta:
+#    lo que se saque del corpus lo decide una persona que leyo el texto, y
+#    tiene que decidirlo ANTES del paso 7, que reconstruye el indice.
 Write-Host "`n[6/9] Escaneando el corpus vivo (informe, no saca nada)..." -ForegroundColor Cyan
 & $py -u scripts\escanear_corpus.py 2>&1 | Tee-Object -FilePath logs\finalize.log -Append
 
