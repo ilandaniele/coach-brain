@@ -1,7 +1,9 @@
 # Lo que la suite necesita para importar, nada mas. Se calculo con un barrido
 # AST de los imports a nivel de modulo de src/coach_brain y tests/, asi que
-# todo lo que se carga tarde (faster-whisper, pymupdf, rapidocr) queda afuera:
-# en CI no hay GPU y ningun test transcribe de verdad.
+# todo lo que se carga tarde (faster-whisper, rapidocr) queda afuera: en CI no
+# hay GPU y ningun test transcribe de verdad. rapidocr tampoco hace falta
+# porque los tests lo inyectan como modulo falso en sys.modules, que es lo que
+# evita bajar cientos de megas de modelos ONNX.
 #
 # torch NO va aca: el workflow lo instala antes desde el indice CPU de PyTorch,
 # porque pyproject.toml lo fija al indice cu130 (la RTX 5070 Ti necesita
@@ -13,6 +15,13 @@ sentence-transformers>=3.3
 streamlit>=1.40
 pillow>=11.0
 pypdf>=5.1
+
+# pymupdf SI va aca, aunque el pipeline lo cargue tarde: 29 tests arman PDFs de
+# verdad con el para probar el OCR y la arbitracion de extract_pdf, y estan
+# guardados con pytest.importorskip. Sin el paquete no fallan, se saltean, y CI
+# pasaria en verde sin haber ejercitado el camino que recupero los 32 PDFs que
+# extrajeron CERO caracteres. La rueda manylinux pesa ~20 MB y no trae modelos.
+pymupdf>=1.24
 gdown>=5.2
 httpx>=0.27
 python-dotenv>=1.0

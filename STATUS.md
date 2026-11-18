@@ -33,6 +33,7 @@ Overview y setup en `README.md`. Este archivo es el estado operativo y los gotch
 | Material del coach | OK | **`C:\Users\Ilan\Desktop\Ilan\Seduccion`** (360GB) — las tres junctions de `data/raw` apuntan ahi y resuelven bien; ver gotcha #7 |
 | Deploy Fly.io | OK | app `coach-brain-ilan`, región `iad`, 4GB / 2 vCPU shared, siempre prendida |
 | Tests | OK | **1000 pasando + 1 salteado** en 35 archivos: `.venv\Scripts\python.exe -m pytest tests/ -q`, ~20 s, sin GPU ni red. Cobertura 99 % sobre `src/coach_brain`. Además `scripts\smoke_test.py --quick` |
+| CI (GitHub Actions) | Escrito, sin pushear | `.github/workflows/ci.yml`: ruff + la suite completa en un runner Linux sin GPU, con `requirements-ci.txt` + torch del índice CPU. Verificado localmente simulando el runner; falta `git push` (ver más abajo) |
 
 ---
 
@@ -878,6 +879,8 @@ coach-brain/
 ├── Dockerfile                ← imagen de Fly (digest pinneado, bge-m3 y RapidOCR pre-bakeados)
 ├── fly.toml                  ← app coach-brain-ilan
 ├── requirements-cloud.txt    ← deps de la imagen (torch CPU)
+├── requirements-ci.txt       ← deps minimas para correr la suite en el runner
+├── .github/workflows/ci.yml  ← ruff + pytest en Linux sin GPU
 ├── pyproject.toml            ← deps + tool.uv.sources para pytorch-cu130
 ├── .env                      ← keys + config (no commitear)
 ├── data/
@@ -914,6 +917,37 @@ coach-brain/
 ├── logs/                     ← UTF-16 (gotcha #5)
 └── qdrant_storage/           ← 38.343 vectores — IRREMPLAZABLE sin re-correr todo
 ```
+
+---
+
+## CI (escrito, todavía sin pushear)
+
+`.github/workflows/ci.yml` corre en cada push y cada pull request sobre un runner Linux
+sin GPU: instala Python 3.12 con `uv`, trae torch desde el índice CPU de PyTorch (el
+`pyproject.toml` lo fija al índice cu130, que pesa varios GB y no sirve sin placa),
+instala `requirements-ci.txt` más el paquete en modo editable sin dependencias, pasa
+`ruff check` por `src`, `tests` y `scripts`, corre la suite completa con `PYTHONUTF8=1` y
+termina compilando los scripts con `compileall`.
+
+`requirements-ci.txt` no es `pyproject.toml` recortado a ojo: se calculó con un barrido
+AST de los imports a nivel de módulo. Lo que el pipeline carga tarde queda afuera cuando
+los tests lo falsean —`faster-whisper` nunca se importa porque ningún test transcribe, y
+el motor de OCR entra como módulo falso en `sys.modules`, lo que evita bajar cientos de
+megas de modelos ONNX—, pero **pymupdf sí está**, porque 29 tests arman PDFs de verdad
+con él y están guardados con `pytest.importorskip`: sin el paquete no fallarían, se
+saltearían, y CI pasaría en verde sin haber ejercitado el OCR de PDFs ni la arbitración
+de `extract_pdf`, que es el camino que recuperó los 32 PDFs que extrajeron CERO
+caracteres.
+
+Que la lista alcanza se verificó sin pushear: un plugin de pytest instala un
+`MetaPathFinder` que levanta `ModuleNotFoundError` para los paquetes que el runner no
+instala, y con eso la suite da **1000 pasando y 1 salteado** —el salteado es local, este
+Windows no deja crear symlinks sin privilegios, así que en Linux deberían correr los
+1001—. Ningún test se saltea por falta de paquetes.
+
+Falta un paso, y es de Ilan: **`git push`**. El workflow está commiteado desde `1446b9b`
+pero nunca se subió, así que GitHub todavía no lo ejecutó. Hasta que no se pushee, lo de
+arriba es una simulación local, no una corrida verde de verdad.
 
 ---
 
