@@ -3,7 +3,7 @@
 > Documento de handoff. Si arrancás una sesión Claude nueva, leé esto primero antes de avanzar.
 
 **Última actualización:** 2026-11-17 22:30
-**Estado general:** Pipeline de ingesta **terminado** y app **desplegada en Fly.io**. El índice que está sirviendo hoy tiene 38.343 vectores y no incluye los libros más grandes. Los huecos de aguas arriba (PDFs que llegaron por WhatsApp, capturas sin OCR, el PDF escaneado) ya están **cerrados en código y en disco**. Lo que queda corriendo es la re-destilación de 301 fuentes con Ollama local (medidas el 17/11 a las 22:25): unas **49 horas** a 43,4 segundos por chunk, medido sobre el log de Ollama. Ver [Huecos del corpus](#huecos-del-corpus-en-curso-2026-11-17).
+**Estado general:** Pipeline de ingesta **terminado** y app **desplegada en Fly.io**. El índice que está sirviendo hoy tiene 38.343 vectores y no incluye los libros más grandes. Los huecos de aguas arriba (PDFs que llegaron por WhatsApp, capturas sin OCR, el PDF escaneado) ya están **cerrados en código y en disco**. Lo que queda corriendo es la re-destilación de 301 fuentes con Ollama local: **unas 50 horas más** al 18/11 a las 02:05, re-medido sobre 4 horas de corrida real (310 chunks, 47,6 s cada uno). Ver [Huecos del corpus](#huecos-del-corpus-en-curso-2026-11-17).
 
 ---
 
@@ -181,6 +181,19 @@ Entre 21:58:22 y 22:20:04 hizo 31 llamadas en 1.302 segundos, o **43,4 segundos
 por chunk**, con la GPU al 51 % y 10.390 de 12.227 MiB ocupados — el modelo
 corre entero en placa, no hay nada mal configurado. A ese ritmo son unas **49
 horas**.
+
+**Re-medido el 18/11 a las 02:05**, ahora sobre 4 horas de corrida en vez de 22
+minutos: 310 chunks entre las 21:58:22 y las 02:04:29, o **47,6 segundos por
+chunk** promedio. Quedan unos **3.750 chunks, unas 50 horas** (termina alrededor
+del 20/11 a la noche). El promedio esconde que el ritmo empeora a medida que
+entra a los libros: las últimas llamadas tardan 76 y 82 segundos, porque un
+chunk de libro llega lleno a los 5.000 caracteres y uno de nota de voz no. Si se
+mantiene en 80 segundos son unas 83 horas, así que **50 horas es el piso, no la
+estimación.** Van 8 fuentes de 301, y el contador de archivos engaña en las dos
+direcciones: entre esas 8 ya entraron tres libros enteros (*Mode One*, *Basta ya
+de ser un tipo lindo*, *Biblia de la Seducción*, los tres con más de 70
+principios cada uno), mientras que las 244 `wa` que quedan son de un chunk y van
+a pasar en minutos.
 
 Ese log es la única forma de ver progreso: `kb/extract.py` loguea una línea por
 *archivo*, no por chunk, y la barra de `rich` es invisible en un log sin tty.
