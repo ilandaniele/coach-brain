@@ -229,12 +229,19 @@ def match_por_duracion(hits, by_base, tol: float = 1.0) -> int:
     return n
 
 
-def _tiene_audio(path: str):
-    """True/False si el contenedor declara pista de audio, None si no se pudo leer.
+def _pista_de_audio(path: str) -> str:
+    """Estado de la pista de audio del contenedor. Uno de cuatro valores.
 
-    None es informacion, no un error: un contenedor que ffprobe no puede abrir
-    esta roto, y eso es justamente lo que hay que distinguir de un archivo sano
-    que todavia no se transcribio.
+    Los cuatro casos son distintos y no se pueden mezclar, porque el motivo que
+    termina escrito en el inventario decide si borrar el archivo pierde algo:
+
+      "si"          hay pista de audio
+      "no"          no hay: un GIF, o un video grabado con el micro apagado
+      "ilegible"    ffprobe abrio el archivo y fallo: el contenedor esta roto
+      "sin_probe"   no se pudo correr ffprobe, asi que no sabemos nada
+
+    "sin_probe" NO es "ilegible". Decir que un archivo esta roto porque falta
+    ffprobe seria afirmar una perdida que no se comprobo.
     """
     try:
         r = subprocess.run(
@@ -243,10 +250,10 @@ def _tiene_audio(path: str):
             capture_output=True, text=True, timeout=120,
         )
     except (OSError, subprocess.SubprocessError):
-        return None
+        return "sin_probe"
     if r.returncode != 0:
-        return None
-    return bool((r.stdout or "").strip())
+        return "ilegible"
+    return "si" if (r.stdout or "").strip() else "no"
 
 
 def _stems_fuera_del_corpus() -> set[str]:
@@ -292,12 +299,18 @@ def clasificar_sin_cubrir(rows) -> int:
             r["motivo"] = "excluido a proposito (transcript en _fuera_del_corpus/)"
             continue
         if r["tipo"] in ("video", "audio"):
-            audio = _tiene_audio(r["path"])
-            if audio is False:
+            audio = _pista_de_audio(r["path"])
+            if audio == "no":
                 r["motivo"] = "sin pista de audio: no hay habla que transcribir"
                 continue
-            if audio is None:
-                r["motivo"] = "contenedor ilegible: ffprobe no lo puede abrir"
+            if audio == "ilegible":
+                r["motivo"] = "HUECO: contenedor ilegible, ffprobe no lo puede abrir"
+                huecos += 1
+                continue
+            if audio == "sin_probe":
+                # La duda se resuelve del lado conservador: queda como hueco,
+                # asi que el archivo no entra en la lista de lo que se borra.
+                r["motivo"] = "HUECO: sin verificar, no se pudo correr ffprobe"
                 huecos += 1
                 continue
         r["motivo"] = "HUECO: falta procesarlo"
@@ -411,8 +424,8 @@ def main() -> None:
     L.append("Estos no tienen transcript ni OCR. El motivo de cada uno esta al lado,")
     L.append("y es lo que decide si borrar el crudo pierde algo: un video sin pista de")
     L.append("audio no tiene habla que perder, y un transcript excluido a proposito")
-    L.append("tampoco es una perdida. Solo los marcados `HUECO` o `ilegible` son")
-    L.append("contenido que se pierde sin forma de recuperarlo.")
+    L.append("tampoco es una perdida. Solo los marcados `HUECO` son contenido que se")
+    L.append("pierde sin forma de recuperarlo.")
     L.append("")
     if sin_cubrir:
         L.append("**%d archivos, %s — de los cuales %d %s hueco%s real%s**"

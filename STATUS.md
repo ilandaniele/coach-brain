@@ -94,7 +94,7 @@ corriendo es la re-destilación, que es larga pero mecánica.
 | 3,43 GB reportados como material sin transcribir que en realidad estaba hecho | Cerrado. `78 que es el valor.mp4` perdió el sufijo `-008` en disco y por eso no matcheaba ni por path ni por nombre contra `video_78 que es el valor-008.json`, que tiene 108.793 caracteres. `scripts/manifest.py` tiene ahora un tercer pase que matchea por duración del audio con ffprobe, tolerancia de 1 segundo (gotcha #23). Cubierto con tests en `tests/test_manifest_duracion.py` |
 | Dos videos de WhatsApp que fallaban con `tuple index out of range` | Cerrado. No tienen pista de audio: no hay nada que transcribir. `ingest/transcribe.py` ahora lo detecta con ffprobe antes de llamar a Whisper, los saltea con un mensaje claro y los cuenta aparte (`sin_audio=N` en el resumen) |
 | 11 PDFs, 2,4 millones de caracteres de libros enteros, indexados como una tira de glifos sin espacios | Cerrado, y es el hueco más grande que apareció. `pypdf.extract_text()` no reconstruye los espacios cuando el PDF los implementa como posicionamiento: devuelve la cantidad correcta de caracteres, así que pasa cualquier control de volumen, pero el texto es `Estoesparaquevayasdiaadia`. pymupdf sí los reconstruye, por geometría, y era solo el fallback de "no salió nada". Ahora `ingest/pdfs.py` compara la proporción de espacios y gana el mejor (gotcha #24). Los 11 se rehicieron: `El poder de los hábitos` pasó de 0,0008 a 0,1487 de espacios, `Basta ya de ser un tipo lindo` y `Mejorando las charlas` de 0,0000 a 0,1536 y 0,1503. Mínimo del corpus ahora: 0,1081. Cubierto con tests en `tests/test_ingest_pptx_pdf.py` |
-| El inventario decía que los 5 archivos sin cubrir se perdían, y de 4 de los 5 era falso | Cerrado. `scripts/manifest.py` escribe ahora el motivo de cada uno y lo comprueba en la corrida: `sin pista de audio` (ffprobe no encuentra ninguna), `contenedor ilegible`, `excluido a propósito` (el transcript está en `_fuera_del_corpus/`) o `HUECO` de verdad. Informa los huecos reales aparte del total (gotcha #25). Hoy: **1 hueco real**, el video truncado que necesita `untrunc` |
+| El inventario decía que los 5 archivos sin cubrir se perdían, y de 4 de los 5 era falso | Cerrado. `scripts/manifest.py` escribe ahora el motivo de cada uno y lo comprueba en la corrida: `sin pista de audio` (ffprobe no encuentra ninguna), `HUECO: contenedor ilegible`, `HUECO: sin verificar` cuando no se pudo correr ffprobe, `excluido a propósito` (el transcript está en `_fuera_del_corpus/`) o `HUECO` de verdad. Informa los huecos reales aparte del total (gotcha #25). Hoy: **1 hueco real**, el video truncado que necesita `untrunc` |
 | Un transcript hecho sin VAD no se distinguía de uno normal | Cerrado. `transcribe.py` anota `vad_filter` en el metadata y `scripts/verificar.py` los lista aparte. Importa porque sin el filtro de voz Whisper alucina sobre ruido (gotcha #22), así que ese texto hay que leerlo antes de confiar en él. Cubierto con tests en `tests/test_transcribe_sin_audio.py` |
 | `finalize.ps1` podía matar la extracción en curso y volar el índice sin aviso | Cerrado. Aborta si detecta un proceso del pipeline corriendo (lista los PIDs en vez de matarlos), pide escribir `SI` antes del `--reset` salvo que se le pase `-Yes`, y agrega una segunda pasada de `kb.extract` para no perder el transcript que escribe su propio paso 1 (gotcha #15) |
 
@@ -473,10 +473,18 @@ la corrida en vez de darlo por sabido:
 
 | Motivo | Cómo se detecta | ¿Se pierde algo? |
 |---|---|---|
-| `sin pista de audio` | `ffprobe -select_streams a` no devuelve ningún índice | No: es un GIF o un video grabado con el micrófono apagado |
-| `contenedor ilegible` | ffprobe falla al abrir el archivo | **Sí.** Es el único caso que hay que atender |
+| `sin pista de audio` | `ffprobe -select_streams a` devuelve 0 y no imprime ningún índice | No: es un GIF o un video grabado con el micrófono apagado |
+| `HUECO: contenedor ilegible` | ffprobe corrió y falló al abrir el archivo | **Sí.** Es el caso que hay que atender |
 | `excluido a propósito` | hay un transcript con ese stem en `data/processed/_fuera_del_corpus/` | No: el material es ruido para el corpus, el texto está guardado |
+| `HUECO: sin verificar` | no se pudo correr ffprobe | **Se asume que sí**, por las dudas |
 | `HUECO: falta procesarlo` | ninguno de los anteriores | **Sí** |
+
+Los dos últimos son la parte que importa del diseño. "No se pudo correr
+ffprobe" **no** es "el archivo está roto": decir lo segundo sería afirmar una
+pérdida que nunca se comprobó, que es el error que este gotcha viene a
+arreglar. Y la duda se resuelve siempre del lado conservador — sin verificación
+el archivo queda marcado como hueco, así que no entra en la lista de lo que se
+puede borrar.
 
 La exclusión se detecta por la presencia del archivo, no por una lista
 hardcodeada, así que sigue funcionando si mañana se saca otra cosa del corpus.
