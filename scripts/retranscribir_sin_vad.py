@@ -118,6 +118,19 @@ ALUCINACIONES = (
 # Whisper tambien inventa dominios, que en una nota de voz no existen.
 _URL = re.compile(r"www\.\S+|https?://", re.I)
 
+# Las mismas frases, para sacarlas de adentro de una frase mas larga. Cuando
+# Whisper las escupe sin puntuacion se fusionan con lo que tienen al lado y
+# dejan de ser una frase entera: "paloma dahi paloma de tennis gracias por ver
+# el video" contaba sus 53 caracteres como habla real.
+#
+# Los limites de palabra no son decorativos: "fin" esta en la lista, y sin
+# \b saldria de "definitivamente", "final" y "afinar". Las mas largas van
+# primero para que "gracias por ver el video" gane contra "gracias".
+_INVENTADAS = re.compile(
+    r"\b(?:" + "|".join(
+        re.escape(f) for f in sorted(ALUCINACIONES, key=len, reverse=True)
+    ) + r")\b", re.I)
+
 # Un texto que colapsa a una sola frase corta repetida es un bucle del decoder,
 # no habla. Con menos repeticiones que esto puede ser enfasis real.
 REPETICIONES_PARA_BUCLE = 3
@@ -192,9 +205,9 @@ def _resto_sin_frases_inventadas(t: str) -> float:
         return 0.0
     queda = 0
     for f in _frases(t):
-        if f in ALUCINACIONES or _URL.search(f):
-            continue
-        queda += len(f)
+        limpio = _INVENTADAS.sub(" ", f)
+        limpio = _URL.sub(" ", limpio)
+        queda += len(" ".join(limpio.split()))
     return queda / total
 
 
@@ -328,6 +341,41 @@ def candidatos(medir_audio: bool = True) -> list[dict]:
     return out
 
 
+# Un bucle que cubre menos que COBERTURA_PARA_BUCLE no alcanza para descartar,
+# pero el que lee tiene que saber que esta ahi. Medido: el caso bueno de 6445
+# caracteres tiene su n-grama mas repetido cubriendo 2.7%, asi que 25% no lo
+# toca, y el caso mitad-habla-mitad-bucle de wa_audio_00029933 cubre 49%.
+AVISO_COBERTURA = 0.25
+
+# Lo mismo con las frases inventadas: por debajo de RESTO_MINIMO se descarta,
+# pero perder una decima parte del texto ya merece una mirada.
+AVISO_INVENTADO = 0.1
+
+
+def avisos(texto: str) -> list[str]:
+    """Senales que no alcanzan para descartar pero que hay que leer sabiendo.
+
+    Existen porque los resultados no se parten en limpios y basura: hay
+    transcripts que son mitad habla real y mitad bucle del decoder. El
+    veredicto los manda a revisar, que es lo correcto, y estos avisos dicen
+    donde mirar. No cambian el veredicto: un aviso de mas cuesta una linea, y
+    una alucinacion promovida sin que nadie la viera cuesta el corpus.
+    """
+    t = (texto or "").strip()
+    if not t:
+        return []
+    out = []
+    g, veces, cobertura = _ngrama_dominante(t)
+    if veces >= REPETICIONES_PARA_BUCLE and cobertura >= AVISO_COBERTURA:
+        out.append("ojo: %r repetido %d veces cubre el %.0f%% del texto"
+                   % (g, veces, cobertura * 100))
+    inventado = 1.0 - _resto_sin_frases_inventadas(t)
+    if inventado >= AVISO_INVENTADO:
+        out.append("ojo: el %.0f%% del texto son frases que Whisper inventa"
+                   % (inventado * 100))
+    return out
+
+
 def _veredicto(nuevo: str, chars_con_vad: int) -> str:
     """Qué conviene hacer con un resultado sin VAD. Marca, no decide.
 
@@ -382,6 +430,10 @@ def juzgar() -> int:
             print("\n  %s" % stem, flush=True)
             print("    %s" % v, flush=True)
             print("    con VAD %d chars | sin VAD %d chars" % (lv, ln), flush=True)
+            if titulo == "A REVISAR":
+                # En el grupo descartado no suman: ya tienen su motivo arriba.
+                for a in avisos(texto):
+                    print("    %s" % a, flush=True)
             print("    %s" % " ".join(texto[:600].split()), flush=True)
     print("\nNada se promueve ni se borra automaticamente: "
           "lo decide una persona que leyo el texto.", flush=True)
