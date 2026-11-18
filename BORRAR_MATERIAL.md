@@ -54,10 +54,10 @@ las cuatro estén hechas y verificadas, no conviene borrar.
    la tapa quedó imperfecta ("Lossecretos"), pero el cuerpo del texto está
    bien.
 
-4. **Lo que estaba escondido y se rescató el 17/11.** Tres archivos figuraban
-   como cubiertos sin estarlo de verdad, y los tres necesitaron el original
-   para arreglarse. Ya está hecho, pero vale saber qué tipo de hueco fue,
-   porque es el que no se ve:
+4. **Lo que estaba escondido y se rescató el 17/11.** Catorce archivos
+   figuraban como cubiertos sin estarlo de verdad, y todos necesitaron el
+   original para arreglarse. Ya está hecho, pero vale saber qué tipo de hueco
+   fue, porque es el que no se ve:
    - `data/raw/whatsapp/00025319-cliente ideal, canva,.zip`. El inventario
      descartaba en silencio cualquier extensión que no estuviera en
      `MEDIA_EXT`, así que el zip no aparecía en ninguna parte. Adentro había
@@ -74,6 +74,19 @@ las cuatro estén hechas y verificadas, no conviene borrar.
      libro escaneado de 132 páginas que estaba registrado con 796 caracteres
      en total. El OCR no lo alcanzaba porque solo se disparaba con cero texto
      extraído.
+   - **Once PDFs más, 2,4 millones de caracteres, con el volumen de texto
+     correcto y el contenido ilegible.** Es el mismo vicio llevado al
+     extremo: `pypdf` no reconstruye los espacios cuando el PDF los
+     implementa como posicionamiento, así que devolvía la cantidad justa de
+     caracteres y el texto era `Estoesparaquevayasdiaadia`. Libros enteros
+     (`El poder de los hábitos`, `El poder del ahora`, `Basta ya de ser un
+     tipo lindo`, `Mejorando las charlas`, `Cómo ser un estoico`, `El
+     secreto`) llevaban meses indexados así. Se rehicieron los once con
+     pymupdf, que sí los reconstruye por geometría, y el gate de
+     `ingest/pdfs.py` ahora compara la proporción de espacios en vez de
+     preguntar si salió algo (gotcha #24 de [STATUS.md](STATUS.md)). **Esto
+     necesitó los PDFs originales**: de haberlos borrado, esos libros
+     quedaban en el corpus como ruido y sin forma de arreglarlos.
 
    Lo que quedó afuera a propósito, por si aparece en el inventario: dos
    `.vcf` (tarjetas de contacto de WhatsApp) y un `Diagrama sin título.drawio`

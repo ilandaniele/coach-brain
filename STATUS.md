@@ -87,7 +87,14 @@ corriendo es la re-destilación, que es larga pero mecánica.
 | Las 25 capturas figuraban como "sin cubrir" en el inventario aun después del OCR | Era un bug de `scripts/manifest.py`: `_out_name` les pone un sufijo `__<hash8>` a las imágenes de fuera de `data/raw/whatsapp`, y `ocr_coverage()` matcheaba por stem exacto. Corregido: ahora registra las dos formas |
 | Un `.zip` adjunto en WhatsApp con material del coach adentro, invisible para el inventario | Cerrado. `scripts/manifest.py` descartaba en silencio toda extensión fuera de `MEDIA_EXT`; ahora las censa y las reporta (gotcha #20). El zip traía `cliente ideal 1.2.pptx` y `canvas 1.3.pdf`, los dos ingestados |
 | Los `.pptx` no se leían en ninguna etapa | Cerrado. `ingest/docs.py` lee `.pptx` con el stdlib (zip de XML), una línea por párrafo y las notas del orador pegadas a su diapositiva, resueltas por el `.rels` y no por el número de archivo. Además la etapa ahora recorre `data/raw/whatsapp`, que nunca había mirado |
-| PDFs con capa de texto casi vacía que pasaban como cubiertos sin llegar al OCR | Cerrado. El gate de `ingest/pdfs.py` era `if not segments and ocr`; ahora rasteriza también cuando el texto es pobre para la cantidad de páginas (gotcha #19). `canvas 1.3.pdf` pasó de 510 a 3.506 caracteres, y el libro escaneado `El Arte Del Buen Sexo` (132 páginas) estaba registrado con 796 caracteres en total |
+| PDFs con capa de texto casi vacía que pasaban como cubiertos sin llegar al OCR | Cerrado. El gate de `ingest/pdfs.py` era `if not segments and ocr`; ahora rasteriza también cuando el texto es pobre para la cantidad de páginas (gotcha #19). `canvas 1.3.pdf` pasó de 510 a 3.506 caracteres, y el libro escaneado `El Arte Del Buen Sexo` (132 páginas) pasó de 796 a **93.830 caracteres** en 126 segmentos, `engine=texto+rapidocr` |
+
+| 62 transcripts vacíos sin explicación | Cerrado por medición, no por criterio. Se midió el `mean_volume` de cada fuente con ffmpeg: **51 dan exactamente -91,0 dB**, que es silencio digital — videos grabados con el micrófono apagado y notas de voz mudas. No se perdió nada. Las 11 con audio audible se re-transcribieron sin VAD (gotcha #22) |
+| Una grabación de campo que el VAD se comió | Cerrado. De esas 11, diez devolvieron alucinaciones de Whisper ("Gracias por ver el video", "¡Suscríbete!" en bucle) y se dejaron vacías a propósito: meterlas al corpus sería peor que el hueco. La undécima, `wa_audio_00027726-AUDIO-2025-07-07-11-01-37` (50 s), tenía habla real y se regeneró: 252 caracteres, 7 segmentos, `vad_filter: false` anotado en el metadata |
+| 3,43 GB reportados como material sin transcribir que en realidad estaba hecho | Cerrado. `78 que es el valor.mp4` perdió el sufijo `-008` en disco y por eso no matcheaba ni por path ni por nombre contra `video_78 que es el valor-008.json`, que tiene 108.793 caracteres. `scripts/manifest.py` tiene ahora un tercer pase que matchea por duración del audio con ffprobe, tolerancia de 1 segundo (gotcha #23). Cubierto con tests en `tests/test_manifest_duracion.py` |
+| Dos videos de WhatsApp que fallaban con `tuple index out of range` | Cerrado. No tienen pista de audio: no hay nada que transcribir. `ingest/transcribe.py` ahora lo detecta con ffprobe antes de llamar a Whisper, los saltea con un mensaje claro y los cuenta aparte (`sin_audio=N` en el resumen) |
+| 11 PDFs, 2,4 millones de caracteres de libros enteros, indexados como una tira de glifos sin espacios | Cerrado, y es el hueco más grande que apareció. `pypdf.extract_text()` no reconstruye los espacios cuando el PDF los implementa como posicionamiento: devuelve la cantidad correcta de caracteres, así que pasa cualquier control de volumen, pero el texto es `Estoesparaquevayasdiaadia`. pymupdf sí los reconstruye, por geometría, y era solo el fallback de "no salió nada". Ahora `ingest/pdfs.py` compara la proporción de espacios y gana el mejor (gotcha #24). Los 11 se rehicieron: `El poder de los hábitos` pasó de 0,0008 a 0,1487 de espacios, `Basta ya de ser un tipo lindo` y `Mejorando las charlas` de 0,0000 a 0,1536 y 0,1503. Mínimo del corpus ahora: 0,1081. Cubierto con tests en `tests/test_ingest_pptx_pdf.py` |
+| `finalize.ps1` podía matar la extracción en curso y volar el índice sin aviso | Cerrado. Aborta si detecta un proceso del pipeline corriendo (lista los PIDs en vez de matarlos), pide escribir `SI` antes del `--reset` salvo que se le pase `-Yes`, y agrega una segunda pasada de `kb.extract` para no perder el transcript que escribe su propio paso 1 (gotcha #15) |
 
 ### Lo que sigue corriendo
 
@@ -120,6 +127,31 @@ por una resultaron ser grabaciones de campo enteras — interacciones completas
 que la corrida original dejó en cero cuando Anthropic se quedó sin crédito. Sus
 extracciones se movieron a `data/processed/_reextraer/`. Las otras ~2.900 son
 legítimas: mediana 258 caracteres, notas de voz sin nada que destilar.
+
+### El verificador
+
+`scripts/verificar.py` existe para que esta clase de hueco no vuelva a
+depender de que alguien lo busque a mano. Es de solo lectura y devuelve 1 si
+encuentra algo sospechoso, así que sirve de gate. Revisa:
+
+1. Transcripts con `full_text` vacío, separando el silencio digital (mide el
+   volumen de la fuente) del hueco real.
+2. Transcripts con menos de 60 caracteres por minuto de audio, en fuentes de
+   más de 30 segundos. El habla normal ronda los 800-1000.
+3. PDFs cuya capa de texto no llega a `OCR_MIN_CHARS_PER_PAGE`.
+4. Texto sin espacios: menos de `MIN_SPACE_RATIO = 0.08` de espacios sobre el
+   total de caracteres, en transcripts de 300 caracteres o más. Es el único
+   control que detecta un texto con el volumen correcto y el contenido
+   ilegible (gotcha #24).
+5. Transcripts sin extracción, y extracciones con 0 ítems — marcando aparte
+   las que vienen de un transcript de 1.500 caracteres o más, que son las que
+   no deberían estar vacías.
+6. Extracciones cuyo transcript ya no existe.
+
+```powershell
+.venv\Scripts\python.exe -I -X utf8 scripts/verificar.py
+.venv\Scripts\python.exe -I -X utf8 scripts/verificar.py --sin-audio  # sin ffmpeg, más rápido
+```
 
 ### Pendiente cuando termine la extracción
 
@@ -167,10 +199,12 @@ ninguno de los dos archivos: escribe un `roto_fixed.mp4` nuevo al lado. El
 clasificador de permisos de auto mode rechaza `docker run` desde Claude, así que
 este paso lo tiene que correr Ilan a mano.
 
-Los otros dos faltantes son clips de WhatsApp:
-`00031653-VIDEO-2025-09-08-11-54-41.mp4` (`tuple index out of range`) y
-`00033588-GIF-2025-10-03-00-26-43.mp4`, un GIF convertido a mp4 que no tiene
-pista de audio y nunca va a dar texto.
+Los otros dos faltantes son clips de WhatsApp, y ya no son un misterio:
+`00031653-VIDEO-2025-09-08-11-54-41.mp4` y
+`00033588-GIF-2025-10-03-00-26-43.mp4`. Se los pasó por ffprobe: **ninguno de
+los dos declara una pista de audio**. El `tuple index out of range` que tiraba
+`ingest.transcribe` era eso, dicho mal. Nunca van a dar texto, y ahora la etapa
+los saltea con un mensaje que lo explica en vez de fallar.
 
 ### Decisión sobre borrar los 360 GB
 
@@ -343,6 +377,79 @@ Para encontrar más casos así, el criterio es `len(full_text) / pages`: un PDF 
 `scripts/manifest.py` descartaba en silencio cualquier extensión que no estuviera en `MEDIA_EXT` (`if ext not in MEDIA_EXT: continue`), así que un formato que el pipeline no maneja no aparecía en ninguna parte del inventario: parecía no existir. Había un `.zip` adjunto en WhatsApp con un `.pptx` y un `.pdf` adentro, los dos con contenido del coach. Ahora el inventario tiene una sección "Formatos que el inventario no clasifica" que cuenta y ejemplifica todo lo descartado. Lo que quedó afuera a propósito: dos `.vcf` (tarjetas de contacto) y un `.drawio` de 15 KB con el mismo diagrama que ya está en el `.pptx`.
 
 ---
+
+### 21. Un transcript vacío no es lo mismo que un hueco del corpus
+
+De los 62 transcripts vacíos, 51 vienen de fuentes que **no tienen sonido**:
+videos grabados con el micrófono apagado, notas de voz mudas. El test que los
+separa es barato y no necesita decodificar nada:
+
+```powershell
+ffmpeg -hide_banner -nostats -i "<archivo>" -vn -af volumedetect -f null -
+```
+
+El silencio digital puro da `mean_volume: -91.0 dB`, siempre ese valor exacto.
+Habla real, incluso lejana o de fondo, queda bien arriba de -60 dB. Sin esta
+medición los 62 parecen 62 huecos y mandan a re-transcribir horas de audio
+que no tiene nada que transcribir.
+
+### 22. El VAD de Whisper decide que no hay habla, y la etapa no reintenta
+
+`transcribe_file` corre con `vad_filter=True`. Cuando el detector de voz no
+encuentra habla, Whisper devuelve cero segmentos y el transcript se guarda
+vacío. Como la etapa saltea por existencia del archivo (gotcha #13), ese vacío
+es permanente.
+
+Para auditarlo está `--sin-vad`:
+
+```powershell
+.venv\Scripts\python.exe -m coach_brain.ingest.transcribe --force --limit 1 --sin-vad
+```
+
+**Hay que leer el resultado antes de confiar en él.** Sin VAD, Whisper alucina
+sobre música y ruido con frases de su corpus de entrenamiento: "Gracias por ver
+el video", "¡Suscríbete!", "Más información www.cdc.gov.ar", repetidas en
+bucle. De las 11 fuentes audibles con transcript vacío, diez devolvieron
+exactamente eso y se dejaron vacías a propósito. Solo una tenía habla real.
+
+### 23. Un archivo renombrado en disco aparece como un hueco del corpus
+
+`scripts/manifest.py` cruzaba fuentes con transcripts por path y por nombre de
+archivo. `78 que es el valor.mp4` perdió el sufijo `-008` en algún momento, así
+que no matcheaba contra `video_78 que es el valor-008.json` por ninguna de las
+dos vías, y el inventario reportaba 3,43 GB de material sin transcribir que
+estaba transcripto hace meses.
+
+El tercer pase matchea por duración del audio, leída del contenedor con
+ffprobe, que es lo único que sobrevive a un renombre. Tolerancia de 1 segundo,
+y el transcript se consume al matchear para que no pueda matchear dos veces.
+Solo corre si quedó algo sin cubrir, así que no cuesta 8.823 llamadas a
+ffprobe en la corrida normal.
+
+### 24. Un PDF puede dar el volumen de texto correcto y ser ilegible igual
+
+`pypdf.extract_text()` no reconstruye los espacios cuando el PDF los implementa
+como posicionamiento de glifos en vez de glifos de espacio. Devuelve la
+cantidad correcta de caracteres —así que pasa el control de volumen del gotcha
+#19 y cualquier otro— pero el texto es una tira pegada:
+`Estoesparaquevayasdiaadia`. El LLM no puede destilar nada de ahí y los
+vectores quedan sin sentido semántico.
+
+Once PDFs del corpus estaban así, 2,4 millones de caracteres, libros enteros, y
+llevaban meses indexados y sirviendo. El motivo estructural es el mismo que el
+gotcha #19: pymupdf estaba puesto como fallback de "pypdf no devolvió nada", y
+el gate preguntaba "¿salió texto?" en vez de "¿sirve?".
+
+El test que los separa es la proporción de espacios sobre el total de
+caracteres. En el corpus la mediana es **0,1921** y el mínimo real es **0,1081**
+(el OCR de capturas de chat); los once roto iban de **0,0000 a 0,0716**. El
+umbral quedó en `MIN_SPACE_RATIO = 0.08`, y vive en dos lugares a propósito:
+`ingest/pdfs.py` lo usa para elegir motor y `scripts/verificar.py` para
+detectar lo que ya está escrito en disco.
+
+Esto no es mojibake: los caracteres de reemplazo (`�`) del corpus son 0 en
+todos los transcripts. El `�` que aparece en la terminal es el renderizado
+cp1252 de la consola (gotcha #5), no el archivo.
 
 ## Costos reales
 
