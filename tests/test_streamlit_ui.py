@@ -31,6 +31,8 @@ doble de todo eso y el registro de con qué lo llamaron.
 
 from __future__ import annotations
 
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -220,8 +222,6 @@ def test_sin_ningun_modelo_configurado_la_app_corta_con_un_aviso(banco, monkeypa
 def test_los_gratis_van_antes_que_los_pagos(banco, monkeypatch):
     """El orden es el default: `index=0` es con lo que contesta si nadie toca
     nada, y no puede ser el que cobra por token."""
-    import types
-
     monkeypatch.setattr(settings, "anthropic_api_key", "sk-ant-de-prueba")
     banco.providers = [types.SimpleNamespace(label="Gemini", key="gemini", model="flash")]
 
@@ -691,12 +691,18 @@ def caja(x0, y0, x1, y1):
 
 
 def poner_ocr(monkeypatch, cajas):
-    """Reemplaza el motor de OCR en el paquete, que es de donde `_get_ocr` lo
-    importa: dentro del script de la app no se puede parchear nada, porque se
-    vuelve a ejecutar entero en cada rerun."""
-    import rapidocr_onnxruntime
+    """Inyecta un `rapidocr_onnxruntime` falso.
 
-    monkeypatch.setattr(rapidocr_onnxruntime, "RapidOCR", lambda: (lambda _arr: (cajas, None)))
+    `_get_ocr()` lo importa adentro de la función, así que basta con que el
+    módulo esté en `sys.modules`: dentro del script de la app no se puede
+    parchear nada, porque se vuelve a ejecutar entero en cada rerun. Y como
+    módulo falso, la librería real no hace falta — que es lo que permite dejarla
+    afuera de `requirements-ci.txt`, donde pesaría cientos de megas por los
+    modelos ONNX.
+    """
+    modulo = types.ModuleType("rapidocr_onnxruntime")
+    modulo.RapidOCR = lambda: (lambda _arr: (cajas, None))
+    monkeypatch.setitem(sys.modules, "rapidocr_onnxruntime", modulo)
 
 
 def subir(at, *archivos):

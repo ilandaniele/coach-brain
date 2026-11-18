@@ -32,7 +32,7 @@ Overview y setup en `README.md`. Este archivo es el estado operativo y los gotch
 | Qdrant | OK (local embebido) | persiste en `./qdrant_storage/` |
 | Material del coach | OK | **`C:\Users\Ilan\Desktop\Ilan\Seduccion`** (360GB) — las tres junctions de `data/raw` apuntan ahi y resuelven bien; ver gotcha #7 |
 | Deploy Fly.io | OK | app `coach-brain-ilan`, región `iad`, 4GB / 2 vCPU shared, siempre prendida |
-| Tests | OK | **1000 pasando + 1 salteado** en 35 archivos: `.venv\Scripts\python.exe -m pytest tests/ -q`, ~40 s, sin GPU ni red. Cobertura 99 % sobre `src/coach_brain`. Además `scripts\smoke_test.py --quick` |
+| Tests | OK | **1000 pasando + 1 salteado** en 35 archivos: `.venv\Scripts\python.exe -m pytest tests/ -q`, ~20 s, sin GPU ni red. Cobertura 99 % sobre `src/coach_brain`. Además `scripts\smoke_test.py --quick` |
 
 ---
 
@@ -1006,7 +1006,9 @@ coach-brain/
    por contacto, el prompt que se arma—, la degradación (Qdrant caído o el proveedor sin
    cuota avisan y la consulta sigue, en vez de dejar la pantalla en blanco) y las notas
    del Tab 3, que es el único lugar donde la app escribe a disco. La primera corrida
-   tarda ~1,2 s y cada rerun 0,03 s, así que el archivo entero cuesta ~30 s.
+   tarda ~1,2 s y cada rerun 0,03 s, así que los 52 tests cuestan ~14 s. El motor de
+   OCR se inyecta como módulo falso en `sys.modules`, de modo que
+   `rapidocr-onnxruntime` sigue afuera de `requirements-ci.txt`.
 
    De lo que queda sin cubrir, 16 de las 18 líneas son `if __name__ == "__main__":` y su
    cuerpo: son puntos de entrada, no lógica. Las otras dos son el `except ValueError` de
