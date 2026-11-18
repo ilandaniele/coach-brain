@@ -42,6 +42,7 @@ recalibre esta lista se mueve con él en vez de quedarse vieja.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import importlib.util
 import json
 import re
@@ -237,7 +238,7 @@ def parece_alucinacion(texto: str) -> str | None:
         return "vacio"
     n = _normalizar(t)
     if n in ALUCINACIONES:
-        return "es solo %r, frase que Whisper inventa sobre ruido" % t.strip()
+        return f"es solo {t.strip()!r}, frase que Whisper inventa sobre ruido"
 
     resto = _resto_sin_frases_inventadas(t)
     if resto < RESTO_MINIMO:
@@ -281,13 +282,13 @@ def clasificar(chars: int, dur: float, db: float | None) -> str | None:
         # filtro, dure 2 segundos o 2 minutos.
         if db is None or db <= SILENCIO_DB:
             return None
-        return "vacio con %.1f dB de audio" % db
+        return f"vacio con {db:.1f} dB de audio"
     if dur < DUR_MINIMA_PARA_JUZGAR:
         return None
     densidad = chars / (dur / 60.0)
     if densidad >= MIN_CHARS_POR_MINUTO:
         return None
-    return "%.1f chars/minuto" % densidad
+    return f"{densidad:.1f} chars/minuto"
 
 
 def candidatos(medir_audio: bool = True) -> list[dict]:
@@ -313,7 +314,7 @@ def candidatos(medir_audio: bool = True) -> list[dict]:
         try:
             d = json.loads(tp.read_text(encoding="utf-8"))
         except Exception as e:  # noqa: BLE001
-            print("ILEGIBLE %s: %s" % (tp.name, e), flush=True)
+            print(f"ILEGIBLE {tp.name}: {e}", flush=True)
             continue
         dur = (d.get("metadata") or {}).get("duration_seconds")
         if not isinstance(dur, (int, float)) or not dur or dur <= 0:
@@ -405,7 +406,7 @@ def juzgar() -> int:
     No promueve nada ni borra nada.
     """
     if not SALIDA.exists():
-        print("no hay nada en %s" % SALIDA, flush=True)
+        print(f"no hay nada en {SALIDA}", flush=True)
         return 0
     res = sorted(SALIDA.glob("*.json"))
     print("resultados sin VAD: %d" % len(res), flush=True)
@@ -414,17 +415,15 @@ def juzgar() -> int:
         try:
             nd = json.loads(rp.read_text(encoding="utf-8"))
         except Exception as e:  # noqa: BLE001
-            print("ILEGIBLE %s: %s" % (rp.name, e), flush=True)
+            print(f"ILEGIBLE {rp.name}: {e}", flush=True)
             continue
         nuevo = (nd.get("full_text") or "").strip()
         orig_p = TRANSCRIPTS / rp.name
         viejo = ""
         if orig_p.exists():
-            try:
+            with contextlib.suppress(Exception):
                 viejo = (json.loads(orig_p.read_text(encoding="utf-8"))
                          .get("full_text") or "").strip()
-            except Exception:  # noqa: BLE001
-                pass
         v = _veredicto(nuevo, len(viejo))
         fila = (rp.stem, len(viejo), len(nuevo), v, nuevo)
         (descartar if v.startswith("DESCARTAR") else revisar).append(fila)
@@ -432,14 +431,14 @@ def juzgar() -> int:
     for titulo, grupo in (("A REVISAR", revisar), ("A DESCARTAR", descartar)):
         print("\n%s: %d" % (titulo, len(grupo)), flush=True)
         for stem, lv, ln, v, texto in grupo:
-            print("\n  %s" % stem, flush=True)
-            print("    %s" % v, flush=True)
+            print(f"\n  {stem}", flush=True)
+            print(f"    {v}", flush=True)
             print("    con VAD %d chars | sin VAD %d chars" % (lv, ln), flush=True)
             if titulo == "A REVISAR":
                 # En el grupo descartado no suman: ya tienen su motivo arriba.
                 for a in avisos(texto):
-                    print("    %s" % a, flush=True)
-            print("    %s" % " ".join(texto[:600].split()), flush=True)
+                    print(f"    {a}", flush=True)
+            print("    {}".format(" ".join(texto[:600].split())), flush=True)
     print("\nNada se promueve ni se borra automaticamente: "
           "lo decide una persona que leyo el texto.", flush=True)
     return 0
@@ -458,8 +457,7 @@ def main() -> int:
     if args.juzgar:
         return juzgar()
 
-    print("umbrales desde verificar.py: piso %.1f chars/minuto, silencio %.1f dB"
-          % (MIN_CHARS_POR_MINUTO, SILENCIO_DB), flush=True)
+    print(f"umbrales desde verificar.py: piso {MIN_CHARS_POR_MINUTO:.1f} chars/minuto, silencio {SILENCIO_DB:.1f} dB", flush=True)
     print("midiendo el volumen de los transcripts vacios con ffmpeg...", flush=True)
     cands = candidatos()
     print("candidatos: %d" % len(cands), flush=True)
@@ -485,8 +483,9 @@ def main() -> int:
 
     SALIDA.mkdir(parents=True, exist_ok=True)
     sys.path.insert(0, str(REPO / "src"))
-    from coach_brain.ingest.transcribe import extract_audio, transcribe_file
     from faster_whisper import WhisperModel
+
+    from coach_brain.ingest.transcribe import extract_audio, transcribe_file
 
     # CPU int8 a proposito: la GPU la esta usando la extraccion con Ollama, y
     # las dos juntas no entran en 12 GB.
@@ -495,7 +494,7 @@ def main() -> int:
 
     for c in pendientes:
         src = c["fuente"]
-        print("\n=== %s  (%.0fs, %s)" % (c["stem"], c["dur"], c["motivo"]), flush=True)
+        print("\n=== {}  ({:.0f}s, {})".format(c["stem"], c["dur"], c["motivo"]), flush=True)
         print("    con VAD:  %d chars | %s" % (c["chars"], c["arranque"]), flush=True)
         try:
             if src.suffix.lower() in VIDEO_EXT:
@@ -508,14 +507,14 @@ def main() -> int:
             else:
                 nd = transcribe_file(model, src, c["tipo"], src, vad=False)
         except Exception as e:  # noqa: BLE001
-            print("    ERROR: %s" % e, flush=True)
+            print(f"    ERROR: {e}", flush=True)
             continue
         destino = SALIDA / (c["stem"] + ".json")
         destino.write_text(json.dumps(nd, ensure_ascii=False, indent=2), encoding="utf-8")
         print("    sin VAD:  %d chars, %d segmentos -> %s"
               % (len(nd["full_text"]), len(nd["segments"]), destino), flush=True)
-        print("    %s" % _veredicto(nd["full_text"], c["chars"]), flush=True)
-        print("    %s" % nd["full_text"][:1500], flush=True)
+        print("    {}".format(_veredicto(nd["full_text"], c["chars"])), flush=True)
+        print("    {}".format(nd["full_text"][:1500]), flush=True)
 
     print("\nlisto. LEER data/processed/_novad/ antes de promover nada al corpus:",
           flush=True)

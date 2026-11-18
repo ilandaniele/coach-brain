@@ -29,7 +29,6 @@ import pytest
 from coach_brain.kb import index as I
 from coach_brain.settings import settings
 
-
 DIM = 4
 
 

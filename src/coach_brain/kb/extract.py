@@ -12,7 +12,7 @@ from pathlib import Path
 import typer
 from anthropic import Anthropic
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from coach_brain.settings import settings
 
@@ -78,9 +78,8 @@ def _repair_json(s: str) -> str:
             in_str = True
         elif ch in "{[":
             stack.append(ch)
-        elif ch in "}]":
-            if stack:
-                stack.pop()
+        elif ch in "}]" and stack:
+            stack.pop()
     if in_str:
         s += '"'
     # Sacar coma colgante antes de cerrar (",  }" / ", ]") que el truncado deja.

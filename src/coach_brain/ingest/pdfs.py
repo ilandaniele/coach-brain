@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
@@ -194,7 +194,7 @@ def extract_pdf(path: Path, ocr: bool = False) -> dict:
         "source_type": "pdf",
         "source_path": _relpath(path),
         "title": path.stem,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "language": settings.whisper_language,
         "metadata": {"pages": n_pages, "duration_seconds": None, "engine": engine},
         "segments": segments,

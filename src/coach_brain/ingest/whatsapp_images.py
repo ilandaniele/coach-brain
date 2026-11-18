@@ -16,7 +16,7 @@ import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
@@ -183,7 +183,7 @@ def aggregate() -> None:
         "source_type": "whatsapp_images",
         "source_path": "data/raw/whatsapp",
         "title": "Screenshots de chats (WhatsApp) — vision",
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "language": "es",
         "metadata": {"chats": len(chats), "total_imagenes_procesadas": len(results)},
         "segments": segments,

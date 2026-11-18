@@ -20,13 +20,12 @@ import hashlib
 import json
 import os
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
 from PIL import Image
 from rich.console import Console
-from rich.progress import track
 
 from coach_brain.settings import settings
 
@@ -56,9 +55,7 @@ def _is_noise(txt: str) -> bool:
     if _NOISE_RE.match(t):
         return True
     # Pura puntuación/dígitos cortos
-    if len(t) <= 3 and not any(c.isalpha() for c in t):
-        return True
-    return False
+    return len(t) <= 3 and not any(c.isalpha() for c in t)
 
 
 def _ocr_image(ocr, path: Path) -> dict:
@@ -203,7 +200,7 @@ def aggregate() -> None:
         "source_type": "whatsapp_images",
         "source_path": "data/raw/whatsapp",
         "title": "Screenshots de chats (WhatsApp) — OCR local",
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "language": "es",
         "metadata": {"chats": len(chats), "total_imagenes_procesadas": len(results), "engine": "rapidocr"},
         "segments": segments,

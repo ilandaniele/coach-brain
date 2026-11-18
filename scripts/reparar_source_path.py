@@ -206,10 +206,10 @@ def main() -> int:
     args = ap.parse_args()
 
     if not TRANSCRIPTS.is_dir():
-        print("no existe %s" % TRANSCRIPTS)
+        print(f"no existe {TRANSCRIPTS}")
         return 1
 
-    print("indexando %s..." % RAW, flush=True)
+    print(f"indexando {RAW}...", flush=True)
     idx = indexar_disco()
     print("  %d nombres distintos" % len(idx))
 
@@ -223,7 +223,7 @@ def main() -> int:
         try:
             d = json.loads(p.read_text(encoding="utf-8"))
         except (OSError, ValueError) as e:
-            print("ILEGIBLE %s: %s" % (p.name, e))
+            print(f"ILEGIBLE {p.name}: {e}")
             continue
         huellas[p.stem] = huella(d)
         sp = d.get("source_path")
@@ -280,22 +280,22 @@ def main() -> int:
                         mejor = (delta, h)
                 if mejor is not None and mejor[0] <= TOLERANCIA_DURACION:
                     arreglos.append((p, d, src, mejor[1],
-                                     "duracion (%.1fs, delta %.2fs)" % (esperada, mejor[0])))
+                                     f"duracion ({esperada:.1f}s, delta {mejor[0]:.2f}s)"))
                     huerfanos.remove(mejor[1])
                     pendientes = [t for t in pendientes if t[0] != p]
 
     print("\n=== RESUELTOS: %d ===" % len(arreglos))
     por_como: dict[str, int] = defaultdict(int)
-    for _p, _d, src, nueva, como in arreglos:
+    for _p, _d, _src, _nueva, como in arreglos:
         por_como[como.split(" (")[0]] += 1
     for k, v in sorted(por_como.items(), key=lambda t: -t[1]):
         print("  %-34s %d" % (k, v))
     for _p, _d, src, nueva, como in arreglos[:5]:
-        print("  ej: %s\n      -> %s  [%s]" % (src, nueva, como))
+        print(f"  ej: {src}\n      -> {nueva}  [{como}]")
 
     # Cuarto pase, solo informativo: lo que quedo sin fuente, ¿tiene un gemelo
     # con el mismo contenido que SI tiene archivo en disco?
-    for _p, _d, _src, nueva, _como in arreglos:
+    for _p, _d, _src, _nueva, _como in arreglos:
         con_fuente.add(_p.stem)
     duplicados: list[tuple[Path, Path, str]] = []
     huerfanos_reales: list[tuple[Path, Path, str]] = []
@@ -319,7 +319,7 @@ def main() -> int:
         print("sobra texto repetido en el corpus. Sacarlo lo decide una persona.")
         for p, src, gemelo in duplicados:
             print("  %-44s == %s" % (p.stem[:44], gemelo))
-            print("      su archivo era: %s" % src)
+            print(f"      su archivo era: {src}")
 
     if huerfanos_reales:
         print("\n=== SIN RESOLVER Y SIN GEMELO: %d ===" % len(huerfanos_reales))
@@ -334,7 +334,7 @@ def main() -> int:
 
     BACKUP.mkdir(parents=True, exist_ok=True)
     n = 0
-    for p, d, src, nueva, como in arreglos:
+    for p, d, src, nueva, _como in arreglos:
         shutil.copy2(p, BACKUP / p.name)
         d.setdefault("metadata", {})["source_path_previo"] = str(src)
         d["source_path"] = str(nueva)

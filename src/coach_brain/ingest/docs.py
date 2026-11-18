@@ -8,7 +8,7 @@ import os
 import posixpath
 import re
 import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
@@ -151,7 +151,7 @@ def build_record(path: Path, source_type: str, parts: list[str]) -> dict:
         "source_type": source_type,
         "source_path": _relpath(path),
         "title": path.stem,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "language": settings.whisper_language,
         "metadata": {"pages": None, "duration_seconds": None, "blocks": len(parts)},
         "segments": segments,

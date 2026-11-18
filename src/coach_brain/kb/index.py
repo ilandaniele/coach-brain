@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-# IMPORTANTE (no reordenar): en Windows con torch cu130, importar qdrant_client
-# ANTES que sentence_transformers/torch produce un access violation (0xC0000005)
-# por conflicto de libs nativas. Forzamos la carga de torch primero.
-import sentence_transformers  # noqa: F401,E402  (orden de carga — ver comentario)
-
 import json
 import threading
 import uuid
 from functools import lru_cache
 from pathlib import Path
 
+# IMPORTANTE (no reordenar): en Windows con torch cu130, importar qdrant_client
+# ANTES que sentence_transformers/torch produce un access violation (0xC0000005)
+# por conflicto de libs nativas. Forzamos la carga de torch primero.
+import sentence_transformers  # noqa: F401,E402  (orden de carga — ver comentario)
 import typer
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams

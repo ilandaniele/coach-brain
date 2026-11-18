@@ -7,7 +7,7 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
@@ -129,7 +129,7 @@ def transcribe_file(
         "source_type": source_type,
         "source_path": _relpath(source_path),
         "title": source_path.stem,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "language": info.language,
         "metadata": {
             "pages": None,

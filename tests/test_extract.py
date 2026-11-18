@@ -32,7 +32,6 @@ import pytest
 from coach_brain.kb import extract as E
 from coach_brain.settings import settings
 
-
 # --- 1) chunking ------------------------------------------------------------
 
 
@@ -50,7 +49,7 @@ def test_los_chunks_reconstruyen_el_texto_entero():
     salir el texto original, carácter por carácter.
     """
     size, overlap = 100, 20
-    texto = ". ".join("oracion numero %d con algo de relleno" % i for i in range(40))
+    texto = ". ".join(f"oracion numero {i} con algo de relleno" for i in range(40))
     chunks = E._chunk_text(texto, size=size, overlap=overlap)
 
     assert len(chunks) > 1, "con 40 oraciones tiene que partir"
@@ -76,9 +75,9 @@ def test_texto_sin_separadores_no_cuelga():
 
 def test_el_overlap_es_contexto_compartido():
     size, overlap = 100, 20
-    texto = ". ".join("frase %d larga para forzar el corte" % i for i in range(20))
+    texto = ". ".join(f"frase {i} larga para forzar el corte" for i in range(20))
     chunks = E._chunk_text(texto, size=size, overlap=overlap)
-    for a, b in zip(chunks, chunks[1:]):
+    for a, b in zip(chunks, chunks[1:], strict=False):  # el ultimo no tiene siguiente
         assert a[-overlap:] == b[:overlap]
 
 
@@ -158,7 +157,7 @@ def test_un_chunk_que_explota_no_pierde_los_otros(tmp_path, monkeypatch):
     def fake(client, plantilla, source_id, idx, chunk):
         if idx == 1:
             raise RuntimeError("ollama se cayo")
-        return {"principios": [{"id": "p%d" % idx}], "situaciones": [], "frases": []}
+        return {"principios": [{"id": f"p{idx}"}], "situaciones": [], "frases": []}
 
     monkeypatch.setattr(E, "extract_chunk", fake)
     monkeypatch.setattr(E, "_chunk_text", lambda t, **k: ["a", "b", "c"])

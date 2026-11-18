@@ -20,7 +20,6 @@ from coach_brain import settings as S
 from coach_brain.kb import embed as E
 from coach_brain.settings import REPO_ROOT, Settings
 
-
 # El `lru_cache` real, guardado antes de que cualquier prueba lo reemplace:
 # el teardown de un fixture corre antes de que monkeypatch deshaga, asi que
 # `E._get_model_cached` todavia es el doble cuando hay que limpiar el cache.

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from coach_brain.settings import settings
@@ -118,7 +118,7 @@ def create_contact(name: str, apellido: str = "", tag: str = "") -> int:
     try:
         cur = c.execute(
             "INSERT INTO contacts(name, apellido, tag, updated_at) VALUES(?,?,?,?)",
-            (name.strip(), apellido.strip(), tag.strip(), datetime.now(timezone.utc).isoformat()))
+            (name.strip(), apellido.strip(), tag.strip(), datetime.now(UTC).isoformat()))
         c.commit()
         return cur.lastrowid
     finally:
@@ -131,7 +131,7 @@ def _save(cid: int, profile: str, history: list) -> None:
         c.execute(
             "UPDATE contacts SET profile=?, history=?, updated_at=? WHERE id=?",
             (profile, json.dumps(history, ensure_ascii=False),
-             datetime.now(timezone.utc).isoformat(), cid))
+             datetime.now(UTC).isoformat(), cid))
         c.commit()
     finally:
         c.close()
@@ -185,7 +185,7 @@ def update_after_analysis(cid: int, chat_text: str, verdict: str, user: str = "I
         return ""
     history = list(cur.get("history", []))
     history.append({
-        "ts": datetime.now(timezone.utc).isoformat(),
+        "ts": datetime.now(UTC).isoformat(),
         "chat": chat_text[:1500], "verdict": verdict[:800],
     })
     history = history[-20:]

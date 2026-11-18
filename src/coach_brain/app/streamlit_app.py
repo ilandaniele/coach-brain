@@ -24,9 +24,9 @@ from coach_brain.kb.memory import (
     update_after_analysis,
 )
 from coach_brain.kb.retrieve import retrieve
-from coach_brain.llm import available_providers, complete as llm_complete, complete_fast
+from coach_brain.llm import available_providers, complete_fast
+from coach_brain.llm import complete as llm_complete
 from coach_brain.settings import settings
-
 
 PRINCIPLES_CORE = """\
 - No subas el esfuerzo cuando ella lo baja.
@@ -292,7 +292,7 @@ def render_answer(answer: str, key_prefix: str) -> None:
     lines = extract_quoted_lines(answer)
     if lines:
         st.markdown("#### 📋 Líneas para copiar")
-        for i, line in enumerate(lines):
+        for line in lines:
             st.code(line, language=None)
         st.divider()
     st.markdown(answer)
@@ -347,6 +347,7 @@ def _get_ocr():
 
 def ocr_chat_from_image(img: Image.Image) -> tuple[str, str]:
     import numpy as np
+
     from coach_brain.ingest.whatsapp_images_ocr import _is_noise
 
     ocr = _get_ocr()

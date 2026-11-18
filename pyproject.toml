@@ -65,3 +65,9 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]
 ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Los scripts imprimen tablas de informe alineadas con formatos de ancho fijo
+# (`%-44s`, `%6d`, `%8.1f`). Reescribirlos a f-strings a ciegas desalinea las
+# columnas sin que falle nada, asi que UP031 no aplica ahi.
+"scripts/*" = ["UP031"]

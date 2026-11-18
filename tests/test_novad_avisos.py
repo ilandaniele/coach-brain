@@ -156,7 +156,7 @@ def test_el_texto_largo_y_limpio_no_pierde_por_la_puntuacion():
     contaba como texto borrado. En un texto con mucha puntuación eso solo
     depende del largo: no dice nada de alucinaciones.
     """
-    limpio = ". ".join("La frase numero %d no tiene nada raro adentro" % i
+    limpio = ". ".join(f"La frase numero {i} no tiene nada raro adentro"
                        for i in range(200)) + "."
     assert M._resto_sin_frases_inventadas(limpio) > 0.99
     # Solo el aviso de frases inventadas. Este texto sintetico repite ocho

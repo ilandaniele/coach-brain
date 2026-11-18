@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
@@ -207,7 +207,7 @@ def run(force: bool = False) -> None:
         "source_type": "whatsapp",
         "source_path": _relpath(chat_path),
         "title": "Coaching WhatsApp — Ema Pereyra / Ilan",
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "language": "es",
         "metadata": {
             "messages": len(messages),

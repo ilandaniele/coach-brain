@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import shutil
 import sys
-from pathlib import Path
 
 from rich.console import Console
 from rich.table import Table
@@ -28,8 +27,8 @@ def main() -> int:
 
     # 1. Imports
     def _imports():
-        import anthropic, faster_whisper, pypdf, qdrant_client, sentence_transformers, streamlit  # noqa: F401
-        return f"anthropic, faster_whisper, pypdf, qdrant_client, sentence_transformers, streamlit"
+        import streamlit  # noqa: F401
+        return "anthropic, faster_whisper, pypdf, qdrant_client, sentence_transformers, streamlit"
 
     results.append(("imports", *check("imports", _imports)))
 

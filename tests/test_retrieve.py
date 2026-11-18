@@ -70,30 +70,30 @@ def test_el_umbral_viaja_a_qdrant(cliente):
     """Si el umbral no llega a la query, no existe: el filtrado no se hace en
     ningún otro lado."""
     R.retrieve("como arranco una charla")
-    assert {l["score_threshold"] for l in cliente.llamadas} == {R.MIN_SCORE}
+    assert {c["score_threshold"] for c in cliente.llamadas} == {R.MIN_SCORE}
 
 
 def test_el_umbral_se_puede_bajar_por_llamada(cliente):
     R.retrieve("algo", min_score=0.0)
-    assert {l["score_threshold"] for l in cliente.llamadas} == {0.0}
+    assert {c["score_threshold"] for c in cliente.llamadas} == {0.0}
 
 
 def test_cada_coleccion_tiene_su_propio_tope(cliente):
     R.retrieve("algo", top_principles=3, top_situations=2, top_style=1)
-    limites = {l["col"]: l["limit"] for l in cliente.llamadas}
+    limites = {c["col"]: c["limit"] for c in cliente.llamadas}
     assert limites == {R.COL_PRINCIPLES: 3, R.COL_SITUATIONS: 2, R.COL_STYLE: 1}
 
 
 def test_se_busca_en_las_tres_colecciones(cliente):
     R.retrieve("algo")
-    assert [l["col"] for l in cliente.llamadas] == [
+    assert [c["col"] for c in cliente.llamadas] == [
         R.COL_PRINCIPLES, R.COL_SITUATIONS, R.COL_STYLE]
 
 
 def test_el_vector_de_la_query_es_el_que_se_busca(cliente):
     """Una query sin embeddear devolvería lo mismo para cualquier pregunta."""
     R.retrieve("algo")
-    assert {l["dim"] for l in cliente.llamadas} == {8}
+    assert {c["dim"] for c in cliente.llamadas} == {8}
 
 
 # --- 2) el prompt nunca queda con un bloque vacío ---------------------------

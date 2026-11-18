@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from coach_brain.ingest.docs import _pptx_slide_text, extract_pptx
 from coach_brain.ingest import pdfs
+from coach_brain.ingest.docs import _pptx_slide_text, extract_pptx
 
 SLIDE_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"

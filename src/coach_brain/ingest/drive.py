@@ -34,7 +34,7 @@ def download(folder_url: str) -> None:
     tmp_dir = settings.raw_path / "_drive_dump"
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
-    console.print(f"[cyan]Bajando carpeta de Drive...[/cyan]")
+    console.print("[cyan]Bajando carpeta de Drive...[/cyan]")
     console.print(f"[dim]URL: {folder_url}[/dim]")
     console.print(f"[dim]Dump temporal: {tmp_dir}[/dim]\n")
 

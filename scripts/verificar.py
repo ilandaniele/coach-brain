@@ -161,10 +161,7 @@ def cargar():
             continue
         md = d.get("metadata") or {}
         sp = d.get("source_path") or ""
-        if sp:
-            abs_src = Path(sp) if os.path.isabs(sp) else REPO / sp
-        else:
-            abs_src = None
+        abs_src = (Path(sp) if os.path.isabs(sp) else REPO / sp) if sp else None
         txt = (d.get("full_text") or "").strip()
         out.append({
             "archivo": tp.name,
@@ -193,7 +190,7 @@ def revisar_transcripts(ts, medir_audio: bool) -> int:
         sospechosos += len(ilegibles)
         print("\nJSON ILEGIBLE: %d" % len(ilegibles))
         for t in ilegibles:
-            print("   %s  %s" % (t["archivo"], t["ilegible"]))
+            print("   {}  {}".format(t["archivo"], t["ilegible"]))
 
     vacios = [t for t in ts if not t.get("ilegible") and t["chars"] == 0]
     print("\nTranscripts vacios: %d" % len(vacios))
@@ -211,7 +208,7 @@ def revisar_transcripts(ts, medir_audio: bool) -> int:
     print("   silencio digital, nada que recuperar: %d" % len(mudos))
     print("   CON AUDIO AUDIBLE y 0 segmentos: %d" % len(con_audio))
     for t, db in sorted(con_audio, key=lambda x: -x[1]):
-        print("      %6.1f dB  %6.0fs  %s" % (db, t["dur"], t["archivo"]))
+        print("      {:6.1f} dB  {:6.0f}s  {}".format(db, t["dur"], t["archivo"]))
     if sin_medir:
         print("   sin medir, fuente ausente o ffmpeg no disponible: %d" % len(sin_medir))
     sospechosos += len(con_audio)
@@ -303,7 +300,7 @@ def revisar_extraccion(ts) -> int:
         print("      %7d chars  %s" % (t["chars"], t["archivo"]))
     print("Extracciones sin transcript: %d" % len(huerfanas))
     for f in huerfanas[:20]:
-        print("   %s" % f.name)
+        print(f"   {f.name}")
 
     return len(exigibles)
 

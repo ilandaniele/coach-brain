@@ -17,7 +17,6 @@ import pytest
 from coach_brain.ingest import docs as D
 from coach_brain.settings import REPO_ROOT, settings
 
-
 # --- helpers ---------------------------------------------------------------
 
 def hacer_docx(path: Path, parrafos=(), tabla=None) -> Path:

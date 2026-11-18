@@ -104,7 +104,7 @@ def _etiqueta_items(n: int | None) -> str:
 
 def main() -> None:
     if not TRANSCRIPTS.is_dir():
-        raise SystemExit("no existe %s" % TRANSCRIPTS)
+        raise SystemExit(f"no existe {TRANSCRIPTS}")
 
     leidos, marcados, avisados = escanear(TRANSCRIPTS)
     chars = sum(n for _, n, _ in marcados)
@@ -121,7 +121,7 @@ def main() -> None:
           % (sum(1 for n in items.values() if n is None),
              sum(1 for n in items.values() if n == 0)))
     for st in llegaron:
-        print("   HAY QUE DECIDIR: %s (%s)" % (st, _etiqueta_items(items[st])))
+        print(f"   HAY QUE DECIDIR: {st} ({_etiqueta_items(items[st])})")
 
     tipos = collections.Counter(
         s.split(":")[0] if ":" in s else s for _, _, s in marcados)

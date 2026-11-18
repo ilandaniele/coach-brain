@@ -18,6 +18,7 @@ eso solo pasa si el material no se pudo recorrer. Para generarlo igual
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import importlib.util
 import json
@@ -102,7 +103,7 @@ def load_transcripts():
         try:
             d = json.loads(tp.read_text(encoding="utf-8"))
         except Exception as e:  # noqa: BLE001
-            huerfanos.append({"transcript": tp.name, "motivo": "JSON ilegible: %s" % e})
+            huerfanos.append({"transcript": tp.name, "motivo": f"JSON ilegible: {e}"})
             continue
         sp = (d.get("source_path") or "").replace("\\", "/")
         texto = (d.get("full_text") or "").strip()
@@ -165,10 +166,8 @@ def scan_disk():
             ext = p.suffix.lower()
             if ext not in MEDIA_EXT:
                 rec = ignorados.setdefault(ext, {"n": 0, "bytes": 0, "ej": []})
-                try:
+                with contextlib.suppress(OSError):
                     rec["bytes"] += p.stat().st_size
-                except OSError:
-                    pass
                 rec["n"] += 1
                 if len(rec["ej"]) < 3:
                     rec["ej"].append(str(p))
@@ -262,7 +261,7 @@ def match_por_duracion(hits, by_base, tol: float = 1.0) -> int:
         h[1] = mejor
         h[2] = "transcript (por duracion)"
         n += 1
-        print("    %s  <->  %s  (%.1fs)" % (
+        print("    {}  <->  {}  ({:.1f}s)".format(
             os.path.basename(h[0]["path"]), mejor["transcript"], d))
     return n
 
@@ -429,10 +428,9 @@ def main() -> None:
     stats = defaultdict(lambda: {"n": 0, "bytes": 0, "cub": 0, "cub_bytes": 0})
     for f, info, via in hits:
         cubierto = info is not None
-        if not cubierto and f["kind"] == "imagen":
-            if Path(f["path"]).stem.lower() in ocr:
-                cubierto = True
-                via = "ocr"
+        if not cubierto and f["kind"] == "imagen" and Path(f["path"]).stem.lower() in ocr:
+            cubierto = True
+            via = "ocr"
         s = stats[f["kind"]]
         s["n"] += 1
         s["bytes"] += max(0, f["size"])
@@ -466,7 +464,7 @@ def main() -> None:
         w = csv.DictWriter(fh, fieldnames=cols)
         w.writeheader()
         w.writerows(rows)
-    print("Escrito %s" % out_csv)
+    print(f"Escrito {out_csv}")
 
     # Los transcripts cuyo archivo si esta en disco, para buscarles gemelo.
     con_fuente = list(by_src.values())
@@ -487,9 +485,8 @@ def main() -> None:
             )
             if gemelo is not None:
                 motivo += (
-                    "\n  DUPLICADO de `%s`, cuyo archivo SI esta en disco: "
-                    "el contenido no se pierde, sobra texto repetido"
-                    % gemelo["transcript"]
+                    "\n  DUPLICADO de `{}`, cuyo archivo SI esta en disco: "
+                    "el contenido no se pierde, sobra texto repetido".format(gemelo["transcript"])
                 )
             huerfanos.append({"transcript": info["transcript"], "motivo": motivo})
 
@@ -536,7 +533,7 @@ def main() -> None:
                      "Columna `via` del CSV.)" % n_dur)
         L.append("")
         for r in sorted(sin_cubrir, key=lambda r: -max(0, r["bytes"]))[:200]:
-            L.append("- `%s` (%s, %s) — %s" % (
+            L.append("- `{}` ({}, {}) — {}".format(
                 r["path"], gb(max(0, r["bytes"])), r["tipo"], r.get("motivo", "")))
         if len(sin_cubrir) > 200:
             L.append("- ... y %d mas, ver el CSV" % (len(sin_cubrir) - 200))
@@ -600,7 +597,7 @@ def main() -> None:
             )
         L.append("")
         for h in huerfanos[:50]:
-            L.append("- `%s` - %s" % (h["transcript"], h["motivo"]))
+            L.append("- `{}` - {}".format(h["transcript"], h["motivo"]))
         if len(huerfanos) > 50:
             L.append("- ... y %d mas" % (len(huerfanos) - 50))
     else:
