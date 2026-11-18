@@ -297,6 +297,10 @@ def test_el_payload_fuerza_json_y_entra_en_la_vram(monkeypatch):
     assert payload["model"] == "qwen2.5:14b-instruct"
     assert payload["format"] == E._OLLAMA_SCHEMA
     assert payload["stream"] is False
+    # 6144, no menos: medido, el prompt de un chunk pesa 2155 tokens y la
+    # salida llega a 892. Con 3072 un chunk toco 2999 y Ollama descarta
+    # prompt sin avisar en vez de fallar. Bajarlo solo servia para meter 2
+    # slots en la VRAM, y el paralelo midio 1,00x.
     assert payload["options"] == {"temperature": 0.1, "num_ctx": 6144}
     assert payload["messages"][0] == {"role": "system", "content": E._SYSTEM}
     assert payload["messages"][1] == {"role": "user", "content": "el prompt"}
@@ -441,3 +445,34 @@ def test_el_tamano_de_chunk_es_el_que_entra_en_el_contexto():
     al OOM que tumbaba el server."""
     assert E.CHUNK_CHARS == 5_000
     assert E.CHUNK_OVERLAP_CHARS == 400
+
+
+def test_dos_hilos_que_entran_juntos_levantan_un_solo_server(monkeypatch, sin_dormir):
+    """Con los chunks en paralelo, si el server se cae los N hilos entran acá
+    juntos. Sin el lock cada uno lanzaría su propio `ollama serve`, y dos
+    servers peleando por el puerto y por los 12 GB de VRAM es peor que la caída
+    que se quería arreglar."""
+    import threading
+
+    arrancado = threading.Event()
+    lanzados = []
+
+    def alive():
+        return arrancado.is_set()
+
+    def popen(cmd, **kw):
+        # Mientras el primero "arranca" el server, el segundo hilo ya está
+        # esperando el lock. Si el lock no existiera, entraría acá también.
+        lanzados.append(cmd)
+        arrancado.set()
+
+    monkeypatch.setattr(E, "_ollama_alive", alive)
+    monkeypatch.setattr(E.subprocess, "Popen", popen)
+
+    hilos = [threading.Thread(target=E._ensure_ollama, args=(2,)) for _ in range(2)]
+    for h in hilos:
+        h.start()
+    for h in hilos:
+        h.join(timeout=10)
+
+    assert len(lanzados) == 1

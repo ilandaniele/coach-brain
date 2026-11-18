@@ -309,3 +309,145 @@ def test_sin_transcripts_avisa_y_no_abre_el_cliente(entorno, monkeypatch, capsys
     E.run()
 
     assert "No hay transcripts" in capsys.readouterr().out
+
+
+# --- 5) la concurrencia de chunks ------------------------------------------
+#
+# Lo que se pide a Ollama y lo que vuelve no cambia por pedirlo de a varios: lo
+# único que cambia es cuándo. Estos tests fijan las tres cosas que sí se podrían
+# romper al paralelizar: el orden del resultado, que un chunk roto no se lleve a
+# los demás, y que el archivo diga cuántos chunks faltaron.
+
+
+def test_el_orden_del_resultado_no_depende_del_orden_de_terminacion(tmp_path, monkeypatch):
+    """`pool.map` devuelve en orden de ENTRADA. Si alguien lo cambiara por
+    `as_completed`, el archivo saldría barajado y el chunk 7 de un libro
+    aparecería antes del 2, que es justo lo que el overlap da por sentado."""
+    import time as _t
+
+    def fake(client, plantilla, source_id, idx, chunk):
+        # El primero tarda más que el último: si se combinara por terminación,
+        # el resultado saldría al revés.
+        _t.sleep(0.05 if idx == 0 else 0.0)
+        return {"principios": [{"id": f"p{idx}"}], "situaciones": [], "frases": []}
+
+    monkeypatch.setattr(E, "extract_chunk", fake)
+    monkeypatch.setattr(E, "_chunk_text", lambda t, **k: ["a", "b", "c", "d"])
+    monkeypatch.setattr(E, "EXTRACT_PARALLEL", 4)
+
+    r = E.process_transcript(None, "plantilla", _transcript(tmp_path, "libro", "texto"))
+    assert [p["id"] for p in r["principios"]] == ["p0", "p1", "p2", "p3"]
+
+
+def test_los_chunks_salen_en_hilos_distintos(tmp_path, monkeypatch):
+    """Que `EXTRACT_PARALLEL` esté en 2 no sirve de nada si igual se piden de a
+    uno: Ollama lee los 9 GB de pesos por token, y leerlos una vez para dos
+    secuencias es TODA la ganancia. Si esto corriera en un solo hilo, la corrida
+    volvería a tardar el doble sin que ningún test se quejara."""
+    import threading as _th
+
+    # La barrera es el test de verdad: solo pasa si DOS chunks estan en vuelo al
+    # mismo tiempo. Con un fake instantaneo no alcanzaba mirar los nombres de los
+    # hilos, porque un solo worker drenaba la cola antes de que arrancara el otro.
+    juntos = _th.Barrier(2, timeout=10)
+
+    def fake(client, plantilla, source_id, idx, chunk):
+        juntos.wait()
+        return {"principios": [], "situaciones": [], "frases": []}
+
+    monkeypatch.setattr(E, "extract_chunk", fake)
+    monkeypatch.setattr(E, "_chunk_text", lambda t, **k: ["a", "b"])
+    monkeypatch.setattr(E, "EXTRACT_PARALLEL", 2)
+
+    r = E.process_transcript(None, "plantilla", _transcript(tmp_path, "libro", "texto"))
+    # Si la barrera hubiera cortado por timeout, los dos chunks quedarian fallidos.
+    assert r["chunks_fallidos"] == []
+
+
+def test_con_paralelo_en_uno_va_en_serie_y_en_el_hilo_principal(tmp_path, monkeypatch):
+    """1 es el default, porque el paralelo midió 1,00x: este es el camino que
+    corre siempre. Tiene que quedar exactamente como antes del parche, sin pool
+    ni hilos."""
+    import threading as _th
+
+    hilos = set()
+
+    def fake(client, plantilla, source_id, idx, chunk):
+        hilos.add(_th.current_thread().name)
+        return {"principios": [], "situaciones": [], "frases": []}
+
+    monkeypatch.setattr(E, "extract_chunk", fake)
+    monkeypatch.setattr(E, "_chunk_text", lambda t, **k: ["a", "b", "c"])
+    monkeypatch.setattr(E, "EXTRACT_PARALLEL", 1)
+
+    E.process_transcript(None, "plantilla", _transcript(tmp_path, "libro", "texto"))
+    assert hilos == {_th.current_thread().name}
+
+
+def test_un_transcript_de_un_solo_chunk_no_arma_pool(tmp_path, monkeypatch):
+    """La mayoría del corpus son audios de WhatsApp de un chunk. Armar y tirar un
+    ThreadPoolExecutor por cada uno de esos miles de archivos es puro costo."""
+    import threading as _th
+
+    hilos = set()
+
+    def fake(client, plantilla, source_id, idx, chunk):
+        hilos.add(_th.current_thread().name)
+        return {"principios": [], "situaciones": [], "frases": []}
+
+    monkeypatch.setattr(E, "extract_chunk", fake)
+    monkeypatch.setattr(E, "_chunk_text", lambda t, **k: ["uno solo"])
+    monkeypatch.setattr(E, "EXTRACT_PARALLEL", 3)
+
+    E.process_transcript(None, "plantilla", _transcript(tmp_path, "wa", "texto"))
+    assert hilos == {_th.current_thread().name}
+
+
+def test_el_archivo_dice_cuantos_chunks_fallaron(tmp_path, monkeypatch):
+    """El defecto de los 32 PDFs que extrajeron cero fue que el archivo se
+    escribía igual y parecía completo. Ahora el conteo viaja DENTRO del JSON, así
+    que un archivo con agujeros se puede encontrar después de la corrida."""
+    def fake(client, plantilla, source_id, idx, chunk):
+        if idx in (1, 3):
+            raise RuntimeError("ollama se cayo")
+        return {"principios": [{"id": f"p{idx}"}], "situaciones": [], "frases": []}
+
+    monkeypatch.setattr(E, "extract_chunk", fake)
+    monkeypatch.setattr(E, "_chunk_text", lambda t, **k: ["a", "b", "c", "d"])
+    monkeypatch.setattr(E, "EXTRACT_PARALLEL", 2)
+
+    r = E.process_transcript(None, "plantilla", _transcript(tmp_path, "libro", "texto"))
+    assert r["chunks_totales"] == 4
+    # Ordenados, no en el orden en que los hilos los fueron agregando.
+    assert r["chunks_fallidos"] == [1, 3]
+
+
+def test_la_linea_de_ok_grita_cuando_el_archivo_esta_incompleto(entorno, monkeypatch, capsys):
+    """La línea roja del chunk se pierde entre miles de líneas. El aviso tiene
+    que estar en la MISMA línea del archivo, que es la que se lee al final."""
+    tdir, _edir = entorno
+    _transcript(tdir, "incompleto", "texto")
+    monkeypatch.setattr(E, "process_transcript", lambda *a: {
+        "source_id": "incompleto", "principios": [], "situaciones": [], "frases": [],
+        "chunks_totales": 10, "chunks_fallidos": [2, 7],
+    })
+
+    E.run()
+
+    salida = capsys.readouterr().out
+    assert "INCOMPLETO: 2 de 10" in salida
+
+
+def test_sin_chunks_fallidos_la_linea_de_ok_queda_limpia(entorno, monkeypatch, capsys):
+    tdir, _edir = entorno
+    _transcript(tdir, "sano", "texto")
+    monkeypatch.setattr(E, "process_transcript", lambda *a: {
+        "source_id": "sano", "principios": [], "situaciones": [], "frases": [],
+        "chunks_totales": 10, "chunks_fallidos": [],
+    })
+
+    E.run()
+
+    salida = capsys.readouterr().out
+    assert "OK" in salida
+    assert "INCOMPLETO" not in salida

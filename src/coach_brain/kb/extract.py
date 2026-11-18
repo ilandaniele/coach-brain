@@ -6,7 +6,9 @@ import json
 import os
 import re
 import subprocess
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import typer
@@ -20,6 +22,30 @@ console = Console()
 
 CHUNK_CHARS = 5_000  # ~1500 tokens; chunk chico = menos salida = sin OOM de Ollama
 CHUNK_OVERLAP_CHARS = 400
+
+# Cuántos chunks se piden a la vez. Queda en 1 porque se midió y NO sirve, pero el
+# código queda: en otra placa sí sirve, y la medición está acá para no repetirla.
+#
+# Medido el 18/11 sobre LOS MISMOS 4 chunks de un PDF, en una RTX 5070 Ti Laptop
+# de 12 GB. 2 slots: 82,6 s. 1 slot: 82,8 s. Ganancia 1,00x. En tok/s de salida,
+# 21,0 contra 18,6-19,2, que está dentro de la variación entre corridas.
+#
+# La teoría decía que tenía que servir: decodificar lee los 9 GB de pesos enteros
+# por token, y hacerlo para N secuencias a la vez los lee UNA sola vez. No sirvió
+# porque esta placa no está limitada por el ancho de banda: a 672 GB/s teóricos,
+# un modelo de 9 GB debería dar ~74 tok/s y da 19, el 26 %. Lo que la frena es que
+# los clocks no suben (ver abajo), y batchear no arregla un clock bajo.
+#
+# Si alguna vez se vuelve a probar con más de 1, hay dos condiciones:
+#  - OLLAMA_NUM_PARALLEL >= este número en el SERVER, o Ollama encola igual.
+#  - Que entre en la VRAM. `ollama ps` tiene que decir `100% GPU`; cualquier
+#    `N%/M% CPU/GPU` manda capas a la CPU y queda MUCHO más lento que en serie.
+#    Con KV fp16 no entra: 3 slots a num_ctx 4096 dieron `11%/89%` y 2 slots a
+#    4096 dieron `6%/94%`. Entra cuantizando el KV, con dos variables del server
+#    (OLLAMA_FLASH_ATTENTION=1 y OLLAMA_KV_CACHE_TYPE=q8_0): así 2 slots a 4096
+#    dan `100% GPU`. Pero con num_ctx 4096 el margen de salida queda corto, así
+#    que esa combinación no es gratis; ver el comentario de num_ctx más abajo.
+EXTRACT_PARALLEL = int(os.environ.get("COACH_EXTRACT_PARALLEL", "1"))
 
 
 def _client() -> Anthropic:
@@ -158,8 +184,22 @@ def _ollama_alive() -> bool:
         return False
 
 
+_LOCK_OLLAMA = threading.Lock()
+
+
 def _ensure_ollama(wait: int = 60) -> bool:
-    """Si el server de Ollama se cayó (típico tras un OOM), lo relanza y espera."""
+    """Si el server de Ollama se cayó (típico tras un OOM), lo relanza y espera.
+
+    El lock existe porque ahora varios chunks corren a la vez: si el server se cae,
+    los N hilos entran acá juntos y sin el lock cada uno lanzaría su propio
+    `ollama serve`. El primero que entra lo levanta; los demás encuentran el server
+    vivo en el chequeo de arriba y salen sin hacer nada.
+    """
+    with _LOCK_OLLAMA:
+        return _ensure_ollama_locked(wait)
+
+
+def _ensure_ollama_locked(wait: int = 60) -> bool:
     if _ollama_alive():
         return True
     exe = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe"
@@ -194,8 +234,22 @@ def _extract_ollama(prompt: str) -> str:
         ],
         "stream": False,
         "format": _OLLAMA_SCHEMA,
-        # num_ctx 6144 + CHUNK_CHARS 5000: footprint chico (~10GB) que entra entero
-        # en la VRAM con headroom -> evita el OOM que tumbaba el server con 8192.
+        # num_ctx 6144 con CHUNK_CHARS 5000, que es con lo que se extrajeron los
+        # 8548 archivos que ya están hechos. El margen sobra a propósito.
+        #
+        # Medido el 18/11 sobre chunks reales de un PDF: el prompt pesa 2107-2155
+        # tokens y la salida llegó a 892, o sea ~3050 en el peor caso visto. Se
+        # probaron 4096 y 3072 para ahorrar KV cache, y 3072 se descartó porque un
+        # chunk tocó 2999 de 3072. Pasado el borde Ollama NO falla: desplaza el
+        # contexto y descarta la parte vieja del prompt, así que el chunk se
+        # extrae a medias y nada lo avisa (el mismo defecto silencioso de los 32
+        # PDFs que extrajeron cero). Bajarlo solo servía para meter 2 slots en
+        # paralelo en la VRAM, y el paralelo midió 1,00x, así que no hay nada que
+        # comprar con ese riesgo.
+        #
+        # Si se sube CHUNK_CHARS o se agranda prompts/extractor.md, hay que volver
+        # a medir prompt_eval_count y eval_count de un chunk real antes de tocar
+        # esto.
         "options": {"temperature": 0.1, "num_ctx": 6144},
     }
     last_err: Exception | None = None
@@ -239,20 +293,42 @@ def process_transcript(client: Anthropic, prompt_template: str, transcript_path:
 
     chunks = _chunk_text(full_text)
 
+    # Los chunks se piden de a EXTRACT_PARALLEL a la vez, pero se combinan EN ORDEN:
+    # `executor.map` devuelve los resultados en el orden de entrada, no en el de
+    # terminación, así que el archivo de salida sale idéntico a como salía en serie.
+    # Cada chunk es independiente (el prompt lleva su propio source_id_cN), así que
+    # el paralelismo no cambia lo que extrae, solo cuándo.
+    fallidos: list[int] = []
+
+    def _uno(par: tuple[int, str]) -> dict:
+        idx, chunk = par
+        try:
+            return extract_chunk(client, prompt_template, source_id, idx, chunk)
+        except Exception as e:  # noqa: BLE001
+            console.print(f"[red]Error en chunk {idx} de {source_id}: {e}[/red]")
+            fallidos.append(idx)
+            return {"principios": [], "situaciones": [], "frases": []}
+
     all_principios: list[dict] = []
     all_situaciones: list[dict] = []
     all_frases: list[dict] = []
 
-    for idx, chunk in enumerate(chunks):
-        try:
-            extracted = extract_chunk(client, prompt_template, source_id, idx, chunk)
-        except Exception as e:  # noqa: BLE001
-            console.print(f"[red]Error en chunk {idx} de {source_id}: {e}[/red]")
-            continue
+    if EXTRACT_PARALLEL > 1 and len(chunks) > 1:
+        with ThreadPoolExecutor(max_workers=EXTRACT_PARALLEL) as pool:
+            resultados = list(pool.map(_uno, enumerate(chunks)))
+    else:
+        resultados = [_uno(par) for par in enumerate(chunks)]
+
+    for extracted in resultados:
         all_principios.extend(extracted.get("principios", []) or [])
         all_situaciones.extend(extracted.get("situaciones", []) or [])
         all_frases.extend(extracted.get("frases", []) or [])
 
+    # Un chunk que falla después de sus 4 reintentos deja un agujero en el archivo
+    # que igual se escribe. Antes eso quedaba en una línea roja perdida entre miles;
+    # ahora el total viaja con el resultado y la línea de OK lo dice, para que un
+    # archivo incompleto no se confunda con uno completo (es el mismo defecto que
+    # tuvieron los 32 PDFs que extrajeron cero sin que nadie se enterara).
     return {
         "source_id": source_id,
         "source_type": data.get("source_type"),
@@ -260,6 +336,8 @@ def process_transcript(client: Anthropic, prompt_template: str, transcript_path:
         "principios": all_principios,
         "situaciones": all_situaciones,
         "frases": all_frases,
+        "chunks_totales": len(chunks),
+        "chunks_fallidos": sorted(fallidos),
     }
 
 
@@ -302,10 +380,17 @@ def run(force: bool = False) -> None:
                     json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
                 )
                 ok += 1
+                fallidos = result.get("chunks_fallidos") or []
+                aviso = (
+                    f" [red]INCOMPLETO: {len(fallidos)} de "
+                    f"{result.get('chunks_totales')} chunks fallaron {fallidos}[/red]"
+                    if fallidos
+                    else ""
+                )
                 console.print(
                     f"[green]OK[/green] {tpath.name} → "
                     f"p={len(result['principios'])} s={len(result['situaciones'])} "
-                    f"f={len(result['frases'])}"
+                    f"f={len(result['frases'])}{aviso}"
                 )
             except Exception as e:  # noqa: BLE001
                 console.print(f"[red]Error procesando {tpath.name}: {e}[/red]")
