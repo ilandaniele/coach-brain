@@ -45,6 +45,9 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 TRANSCRIPTS = REPO / "data" / "processed" / "transcripts"
+# Staging de la auditoria sin VAD. Ninguna etapa lo lee: esta aca para que
+# el verificador avise que hay resultados esperando que alguien los juzgue.
+NOVAD = REPO / "data" / "processed" / "_novad"
 EXTRACTED = REPO / "data" / "processed" / "extracted"
 
 # Un video muteado o una nota de voz muda dan -91 dB (silencio digital puro).
@@ -347,6 +350,46 @@ def revisar_duplicados(ts) -> int:
                   % (t["chars"], t["dur"], "si" if t["fuente"] else "NO", t["stem"]))
     return len(grupos)
 
+def revisar_novad_pendientes(ts) -> None:
+    """Informa que hay en el staging de la auditoria sin VAD. No suma sospechosos.
+
+    Los resultados de `retranscribir_sin_vad.py` van a un directorio que ninguna
+    etapa lee, para que una alucinacion no pueda entrar al corpus sola. El costo
+    de ese diseño es que el staging es invisible: se puede llenar de trabajo sin
+    juzgar y no aparecer en ningun reporte. Esto lo hace visible, que es la razon
+    por la que existe este script.
+
+    No dice cual promover. Eso lo decide una persona que leyo el texto, con
+    `retranscribir_sin_vad.py --juzgar`.
+    """
+    if not NOVAD.exists():
+        return
+    res = sorted(NOVAD.glob("*.json"))
+    if not res:
+        return
+    vivos = {t["archivo"]: t.get("chars", 0) for t in ts}  # ilegible no trae chars
+    crecieron = 0
+    for rp in res:
+        try:
+            nuevo = json.loads(rp.read_text(encoding="utf-8")).get("full_text") or ""
+        except Exception:  # noqa: BLE001
+            continue
+        if len(nuevo.strip()) > vivos.get(rp.name, 0):
+            crecieron += 1
+    # relative_to explota si NOVAD no esta debajo del repo, que es el caso en
+    # los tests y seria el caso si alguien lo apunta a otro disco.
+    try:
+        donde = NOVAD.relative_to(REPO)
+    except ValueError:
+        donde = NOVAD
+    print("\nAuditoria sin VAD: %d resultados en %s, sin promover"
+          % (len(res), donde))
+    print("   %d tienen mas texto que la version con VAD, que NO quiere decir "
+          "que sea habla: la mayoria es alucinacion." % crecieron)
+    print("   Que hacer con cada uno: "
+          "scripts/retranscribir_sin_vad.py --juzgar")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Busca huecos silenciosos en el corpus.")
     ap.add_argument(
@@ -361,6 +404,7 @@ def main() -> int:
     sospechosos += revisar_extraccion(ts)
     # Los duplicados no suman: sobra texto, no falta.
     revisar_duplicados(ts)
+    revisar_novad_pendientes(ts)
     print("\nSOSPECHOSOS: %d" % sospechosos)
     return 1 if sospechosos else 0
 
