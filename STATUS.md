@@ -32,7 +32,7 @@ Overview y setup en `README.md`. Este archivo es el estado operativo y los gotch
 | Qdrant | OK (local embebido) | persiste en `./qdrant_storage/` |
 | Material del coach | OK | **`C:\Users\Ilan\Desktop\Ilan\Seduccion`** (360GB) — las tres junctions de `data/raw` apuntan ahi y resuelven bien; ver gotcha #7 |
 | Deploy Fly.io | OK | app `coach-brain-ilan`, región `iad`, 4GB / 2 vCPU shared, siempre prendida |
-| Tests | ⬜ No hay | `tests/` está vacío. Única verificación: `scripts\smoke_test.py` |
+| Tests | OK | **364 pasando + 1 salteado** en 21 archivos: `.venv\Scripts\python.exe -m pytest tests/ -q`, ~19 s, sin GPU ni red. Además `scripts\smoke_test.py --quick` |
 
 ---
 
@@ -879,7 +879,7 @@ coach-brain/
 │   ├── escanear_corpus.py    ← pasa ese detector por el corpus vivo; solo lee
 │   ├── reparar_source_path.py    ← reescribe los source_path muertos (gotcha #26)
 │   └── resume, status, watch, transcribe_batches, smoke_test, upload_to_qdrant_cloud
-├── tests/                    ← 210 tests en 17 archivos; `python -m pytest tests/ -q`
+├── tests/                    ← 364 tests (+1 salteado) en 21 archivos; `python -m pytest tests/ -q`
 ├── logs/                     ← UTF-16 (gotcha #5)
 └── qdrant_storage/           ← 38.343 vectores — IRREMPLAZABLE sin re-correr todo
 ```
@@ -898,7 +898,7 @@ coach-brain/
    disco externo en lugar de borrarlo, para no perder la opción de re-transcribir.
 4. **Curación manual** — `data/curated/` sigue vacío. La idea era revisar a mano los
    principios extraídos antes de indexar; nunca se hizo. ¿Vale la pena a esta altura?
-5. **Tests** — ya no está vacío: **210 tests pasando** en 17 archivos
+5. **Tests** — ya no está vacío: **364 pasando y 1 salteado** en 21 archivos
    (`.venv\Scripts\python.exe -m pytest tests/ -q`). Cubren los umbrales del
    verificador, los cuatro motivos de "sin cubrir", el criterio de duplicado, a quién
    manda a re-transcribir la auditoría sin VAD, su detector de alucinaciones con sus
@@ -920,8 +920,29 @@ coach-brain/
    no un error) y que `complete_fast()` nunca levante: devuelve `""` y la tarea chica
    no corta la respuesta principal. Corren con un doble en lugar de Ollama, de Qdrant
    y de `httpx`, así que no piden GPU, ni abren el índice, ni hacen una llamada de
-   red. Lo que sigue **sin una sola prueba** es la transcripción: necesita GPU y un
-   archivo de audio de verdad.
+   red.
+
+   También desde el 18-11: la memoria por contacto (`kb/memory.py`), que es el único
+   lugar del proyecto que persiste datos del usuario — incluida la migración del
+   esquema viejo y el caso que importa, que un análisis sin modelo disponible **no
+   borra** el perfil que ya había. El parser del export de WhatsApp
+   (`ingest/whatsapp.py`), que produce la fuente más grande del corpus y la única con
+   roles: el `p. m.` del iOS español, los invisibles que mete iOS, los siete tipos de
+   adjunto y que un mensaje con solo el marcador de audio igual entre. Los documentos
+   (`ingest/docs.py`): el `.docx` con sus tablas, el `.epub`, y el barrido que
+   **deduplica por path canónico** — sin eso las tres junctions de `data/raw` harían
+   procesar cada libro tres veces. Y la configuración (`settings.py` más
+   `kb/embed.py`): que un `data_dir` relativo cuelgue de `REPO_ROOT` y uno absoluto se
+   respete, que los ocho paths derivados apunten donde cada etapa espera, que con
+   `QDRANT_URL` el storage local quede vacío para no tomar el lock de un embedded que
+   no se usa, que una env var vacía no tape al `.env`, y que `embed([])` devuelva `[]`
+   sin cargar los 2,2 GB del modelo.
+
+   Lo que sigue **sin una sola prueba**: `app/streamlit_app.py` (944 líneas, la
+   interfaz), `ingest/whatsapp_images.py` y `ingest/whatsapp_images_ocr.py` (el OCR de
+   las capturas), `app/pwa.py`, `ingest/drive.py` y `cli.py`. De `ingest/transcribe.py`
+   solo está cubierto el camino sin audio y la anotación de `vad_filter`: transcribir de
+   verdad necesita GPU y un archivo de audio, así que eso no se prueba en la suite.
 6. **Los 9 grupos de contenido duplicado** — el mismo material entró al pipeline dos
    veces con nombres distintos (4 videos de clase, 3 libros, 2 notas de voz). No falta
    nada: sobra texto repetido en el corpus y en el índice, y eso sesga la búsqueda porque
