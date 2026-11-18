@@ -3,7 +3,7 @@
 > Documento de handoff. Si arrancás una sesión Claude nueva, leé esto primero antes de avanzar.
 
 **Última actualización:** 2026-11-18 (tarde)
-**Estado general:** Pipeline de ingesta **terminado** y app **desplegada en Fly.io**. El índice que está sirviendo hoy tiene 38.343 vectores y no incluye los libros más grandes. Los huecos de aguas arriba (PDFs que llegaron por WhatsApp, capturas sin OCR, el PDF escaneado) ya están **cerrados en código y en disco**. Lo que queda corriendo es la re-destilación de 301 fuentes con Ollama local: **unas 50 horas más** al 18/11 a las 02:05, re-medido sobre 4 horas de corrida real (310 chunks, 47,6 s cada uno). Ver [Huecos del corpus](#huecos-del-corpus-en-curso-2026-11-17).
+**Estado general:** Pipeline de ingesta **terminado** y app **desplegada en Fly.io**. El índice que está sirviendo hoy tiene 38.343 vectores y no incluye los libros más grandes. Los huecos de aguas arriba (PDFs que llegaron por WhatsApp, capturas sin OCR, el PDF escaneado) ya están **cerrados en código y en disco**. Lo que queda corriendo es la re-destilación de 301 fuentes con Ollama local: **unas 56 horas** al 18/11 a las 11:45, re-medido sobre 11,5 horas de corrida real (279.000 caracteres por hora), o sea que termina alrededor del **20/11 a la noche**. Ver [Huecos del corpus](#huecos-del-corpus-en-curso-2026-11-17).
 
 ---
 
@@ -61,8 +61,26 @@ Interior`, 1,37 M; `El arte de la seducción`, 1,34 M; `El método`, 0,91 M) y s
 despachar rápido. El ritmo real de Ollama local sobre los dos PDFs que terminaron en
 las últimas 2,4 h es de **345 000 caracteres por hora**, así que faltan unas **50 horas**
 —termina alrededor del 2026-11-20 a la mañana— y conviene no tocar la GPU hasta
-entonces. El avance se mira con `ls data/processed/extracted | wc -l` o en
-`logs/extract_fix.log`, que es UTF-16 (gotcha #5).
+entonces. El avance se mira con `ls data/processed/extracted | wc -l`, que es la
+señal honesta: `logs/extract_fix.log` va con bloques de 8 KB atras de la realidad
+porque Python bufferea stdout cuando el destino es un archivo. Ese log, ademas, **no
+es UTF-16**: esta corrida redirige adentro de `cmd /c`, no en PowerShell, así que es
+UTF-8 pelado. El gotcha #5 vale para la redirección de PowerShell, no para el
+pipeline; mirá los primeros bytes antes de elegir el decodificador.
+
+**Re-medido (2026-11-18, 11:45).** Quedan **295 archivos, 15,58 M de caracteres**. El
+ritmo sobre las últimas 11,5 horas de corrida real (12 PDFs terminados, 3,22 M de
+caracteres) es de **279.000 caracteres por hora**, más bajo que los 345.000 de las
+04:30 porque lo que entra ahora son todos libros: un chunk de libro llega lleno a los
+5.000 caracteres y uno de nota de voz no. A ese ritmo faltan **unas 56 horas**, o sea
+que termina alrededor del **20/11 a la noche**, no a la mañana. El último archivo de la
+lista es `whatsapp_images_chats` con 2,31 M de caracteres: unas 8 horas él solo.
+
+Que el contador no se mueva por horas **no significa que esté colgado**. Entre las
+09:32 y las 11:45 no salió ningún archivo nuevo y el proceso estaba sano: Ollama
+consumió 24,7 segundos de CPU en 30 de reloj. Un libro de 1,3 M de caracteres son 270
+chunks a ~48 s cada uno, así que son 3 o 4 horas sin una sola línea de salida. Para
+saber si vive, mirá el CPU de `ollama`, no el contador de archivos.
 
 Desglose de las 8838 fuentes:
 
