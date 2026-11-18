@@ -82,6 +82,14 @@ OCR_MIN_CHARS_PER_PAGE = 400
 # 0,0507. El mismo umbral vive en ingest/pdfs.py.
 MIN_SPACE_RATIO = 0.08
 
+# Dos transcripts son el mismo contenido si arrancan igual y ademas coinciden en
+# largo o en duracion. El arranque solo no alcanza: dos notas de voz distintas
+# pueden empezar con la misma muletilla. Y el largo solo tampoco: dos pasadas de
+# Whisper sobre el mismo video dan duracion identica al microsegundo pero largos
+# distintos, porque el decodificado no es determinista.
+CABECERA_DUPLICADO = 200
+TOLERANCIA_DUPLICADO = 0.01
+
 # Por debajo de este largo la proporcion de espacios no dice nada: un
 # transcript de diez caracteres puede no tener ninguno legitimamente.
 CHARS_MINIMO_PARA_ESPACIOS = 300
@@ -130,6 +138,7 @@ def cargar():
             "tipo": d.get("source_type") or "",
             "chars": len(txt),
             "espacios": (txt.count(" ") / len(txt)) if txt else 0.0,
+            "cabecera": txt[:CABECERA_DUPLICADO],
             "dur": md.get("duration_seconds") or 0.0,
             "pages": md.get("pages") or 0,
             "engine": md.get("engine"),
@@ -265,6 +274,49 @@ def revisar_extraccion(ts) -> int:
     return len(exigibles)
 
 
+def revisar_duplicados(ts) -> int:
+    """Imprime los grupos de transcripts que repiten el mismo contenido.
+
+    No es un hueco: es lo contrario. La misma fuente entro al pipeline dos veces
+    con nombres distintos, asi que el corpus tiene el texto duplicado y el indice
+    tambien. Eso sesga la busqueda, porque un pasaje repetido ocupa dos lugares
+    entre los resultados mas parecidos.
+
+    Sacar uno de los dos borra datos, y eso lo decide una persona. Esta funcion
+    los lista y no toca nada, ni suma al conteo de sospechosos.
+    """
+    por_cabecera: dict[str, list] = {}
+    for t in ts:
+        if t.get("ilegible"):
+            continue
+        cab = t.get("cabecera") or ""
+        if len(cab) < CABECERA_DUPLICADO:
+            continue
+        por_cabecera.setdefault(cab, []).append(t)
+
+    grupos = []
+    for lst in por_cabecera.values():
+        if len(lst) < 2:
+            continue
+        confirmado = any(
+            a["chars"] == b["chars"]
+            or (a["dur"] and b["dur"] and abs(a["dur"] - b["dur"]) <= TOLERANCIA_DUPLICADO)
+            for i, a in enumerate(lst)
+            for b in lst[i + 1:]
+        )
+        if confirmado:
+            grupos.append(sorted(lst, key=lambda t: t["stem"]))
+
+    print("\nDuplicados de contenido: %d grupo(s)" % len(grupos))
+    if grupos:
+        print("   (texto repetido en el corpus y en el indice; sacar uno borra datos)")
+    for g in sorted(grupos, key=lambda g: -g[0]["chars"]):
+        print("   grupo de %d:" % len(g))
+        for t in g:
+            print("      %7d chars  %8.1fs  fuente=%s  %s"
+                  % (t["chars"], t["dur"], "si" if t["fuente"] else "NO", t["stem"]))
+    return len(grupos)
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Busca huecos silenciosos en el corpus.")
     ap.add_argument(
@@ -277,6 +329,8 @@ def main() -> int:
     print("transcripts: %d" % len(ts))
     sospechosos = revisar_transcripts(ts, medir_audio=not args.sin_audio)
     sospechosos += revisar_extraccion(ts)
+    # Los duplicados no suman: sobra texto, no falta.
+    revisar_duplicados(ts)
     print("\nSOSPECHOSOS: %d" % sospechosos)
     return 1 if sospechosos else 0
 
