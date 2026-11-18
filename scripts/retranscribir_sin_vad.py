@@ -200,14 +200,19 @@ def _resto_sin_frases_inventadas(t: str) -> float:
     repetido conservan cero, por mucho que las repeticiones no lleguen al piso
     de tres.
     """
-    total = len(_normalizar(t))
-    if not total:
-        return 0.0
+    # El denominador se mide sobre las mismas frases que el numerador. Medido
+    # sobre el texto entero, cada punto y cada salto de linea que se come el
+    # split contaba como texto borrado: el PDF de 95941 caracteres daba 11%
+    # "inventado" teniendo adentro seis frases de la lista, unos 30 caracteres.
+    total = 0
     queda = 0
     for f in _frases(t):
+        total += len(f)
         limpio = _INVENTADAS.sub(" ", f)
         limpio = _URL.sub(" ", limpio)
         queda += len(" ".join(limpio.split()))
+    if not total:
+        return 0.0
     return queda / total
 
 

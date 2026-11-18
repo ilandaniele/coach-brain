@@ -143,3 +143,36 @@ def test_los_avisos_no_cambian_el_veredicto():
     """
     assert M.avisos(_CASO_29933), "el texto tiene que dar avisos para que el test sirva"
     assert M._veredicto(_CASO_29933, 108).startswith("REVISAR")
+
+
+# --- 3) el denominador se mide sobre las mismas frases que el numerador -----
+
+
+def test_el_texto_largo_y_limpio_no_pierde_por_la_puntuacion():
+    """El PDF de 95941 caracteres daba 11% "inventado" con 30 caracteres de lista.
+
+    `total` se medía sobre el texto entero y `queda` sobre las frases ya
+    partidas, así que cada punto y cada salto de línea que se come el split
+    contaba como texto borrado. En un texto con mucha puntuación eso solo
+    depende del largo: no dice nada de alucinaciones.
+    """
+    limpio = ". ".join("La frase numero %d no tiene nada raro adentro" % i
+                       for i in range(200)) + "."
+    assert M._resto_sin_frases_inventadas(limpio) > 0.99
+    # Solo el aviso de frases inventadas. Este texto sintetico repite ocho
+    # palabras en cada frase, asi que el aviso de cobertura salta con razon:
+    # eso es un bucle, y no es lo que mide este test.
+    assert not any("Whisper inventa" in a for a in M.avisos(limpio))
+
+
+def test_lo_que_mide_ahora_es_solo_lo_que_se_saca():
+    """Media frase de lista en una frase, con el resto limpio.
+
+    "gracias por ver el video" son 24 de los 48 caracteres de la frase, así
+    que el resto tiene que dar cerca de la mitad y no depender del largo del
+    texto que la rodea.
+    """
+    una = "che mira esto gracias por ver el video"
+    diez = (una + ". ") * 10
+    assert abs(M._resto_sin_frases_inventadas(una)
+               - M._resto_sin_frases_inventadas(diez)) < 0.02
