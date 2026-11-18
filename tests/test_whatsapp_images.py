@@ -671,6 +671,20 @@ def test_una_imagen_que_falla_no_detiene_a_las_demas(arbol, monkeypatch, motor):
     assert salidas == ["b.json"]
 
 
+# --- _source_file ----------------------------------------------------------
+
+def test_el_source_file_de_una_imagen_de_raw_es_su_path_relativo(arbol):
+    p = arbol / "raw" / "docs" / "Interacciones" / "1.png"
+    assert O._source_file(p).replace("\\", "/") == "docs/Interacciones/1.png"
+
+
+def test_una_imagen_fuera_de_raw_cae_al_nombre_y_no_explota(arbol, tmp_path):
+    """`relative_to` tira ValueError, no devuelve None: sin el fallback la
+    imagen entera se perdia con una excepcion por un campo de metadata."""
+    afuera = tmp_path.parent / "otro_lado" / "1.png"
+    assert O._source_file(afuera) == "1.png"
+
+
 # --- aggregate (OCR) -------------------------------------------------------
 
 def test_el_agregado_del_ocr_marca_el_motor(arbol):

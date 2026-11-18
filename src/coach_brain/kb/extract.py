@@ -41,7 +41,10 @@ def _chunk_text(text: str, size: int = CHUNK_CHARS, overlap: int = CHUNK_OVERLAP
         return [text]
     chunks: list[str] = []
     start = 0
-    while start < len(text):
+    # El `while` nunca sale por su condicion: el ciclo siempre corta con el
+    # `break` de abajo, porque llega ahi en cuanto `end` toca el final del
+    # texto. De ahi el `no branch`: la salida de arriba no es alcanzable.
+    while start < len(text):  # pragma: no branch
         end = min(start + size, len(text))
         # Tratá de cortar en punto/salto de línea cercano
         if end < len(text):

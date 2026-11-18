@@ -104,6 +104,24 @@ def _ocr_image(ocr, path: Path) -> dict:
     }
 
 
+def _source_file(p: Path) -> str:
+    """De que archivo salio la imagen, relativo a `data/raw`.
+
+    Para las raices extra el nombre solo no alcanza para saber de que
+    conversacion salio: ahi los nombres se repiten entre carpetas ("1.png",
+    "meli 1.png"), asi que se guarda el path y no el stem.
+
+    El fallback al nombre es para una imagen que quedo fuera de `data/raw`.
+    Hoy no puede pasar por `run()` —barre solo subcarpetas de raw_path—, pero
+    si manana entra otra raiz, mejor un nombre a secas que una excepcion que
+    tira abajo la imagen entera.
+    """
+    try:
+        return str(p.relative_to(settings.raw_path))
+    except ValueError:
+        return p.name
+
+
 def run(limit: int = 0) -> None:
     from rapidocr_onnxruntime import RapidOCR
 
@@ -155,12 +173,7 @@ def run(limit: int = 0) -> None:
         out_path = out_dir / _out_name(p)
         try:
             data = _ocr_image(ocr, p)
-            # Para las raices extra el nombre solo no alcanza para saber de
-            # que conversacion salio ("1.png"), asi que guardamos el path.
-            try:
-                data["source_file"] = str(p.relative_to(settings.raw_path))
-            except ValueError:
-                data["source_file"] = p.name
+            data["source_file"] = _source_file(p)
             out_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
             counts["chat" if data["es_chat"] else "other"] += 1
         except Exception as e:  # noqa: BLE001

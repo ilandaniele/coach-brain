@@ -271,6 +271,33 @@ def test_el_nombre_de_salida_es_el_que_lee_el_indexador(entorno, monkeypatch):
     assert [p.name for p in edir.iterdir()] == ["wa_audio_0001.extracted.json"]
 
 
+def test_con_el_backend_de_anthropic_el_cliente_se_arma_una_vez_y_se_reparte(
+    entorno, monkeypatch, capsys
+):
+    """Un cliente por corrida, no uno por transcript: son 8.838 archivos.
+
+    Y el cartel de Ollama no tiene que salir, porque dice "local, gratis" y en
+    este camino cada chunk se paga por token.
+    """
+    tdir, _edir = entorno
+    _transcript(tdir, "uno", "texto")
+    _transcript(tdir, "dos", "texto")
+    monkeypatch.setattr(settings, "extractor_backend", "anthropic")
+    monkeypatch.setattr(E, "_client", lambda: "CLIENTE")
+
+    vistos = []
+
+    def fake(client, plantilla, tpath):
+        vistos.append(client)
+        return {"source_id": tpath.stem, "principios": [], "situaciones": [], "frases": []}
+
+    monkeypatch.setattr(E, "process_transcript", fake)
+    E.run()
+
+    assert vistos == ["CLIENTE", "CLIENTE"]
+    assert "local, gratis" not in capsys.readouterr().out
+
+
 def test_sin_transcripts_avisa_y_no_abre_el_cliente(entorno, monkeypatch, capsys):
     """El orden importa: la lista de transcripts se mira ANTES de construir el
     cliente. Con la carpeta vacía y el backend en anthropic, pedir la API key

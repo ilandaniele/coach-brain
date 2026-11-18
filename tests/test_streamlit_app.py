@@ -366,6 +366,22 @@ def test_sin_marcador_de_estado_el_encabezado_se_conserva(app, monkeypatch):
     assert "no me contestaste nada" in chat
 
 
+def test_una_captura_que_es_solo_el_encabezado_no_deja_mensajes(app, monkeypatch):
+    """El barrido de la franja superior se queda sin items en vez de cortar por
+    el `break`. Pasa con una captura recortada al encabezado: si eso devolviera
+    el nombre del contacto como mensaje, el analisis arrancaria con una linea
+    que nadie escribio."""
+    poner_ocr(app, monkeypatch, [
+        (caja(10, 2, 60, 6), "Meli", 0.9),
+        (caja(10, 7, 60, 10), "en línea", 0.9),
+    ])
+
+    chat, crudo = app.ocr_chat_from_image(imagen())
+
+    assert chat == ""
+    assert "Meli" in crudo, "el crudo guarda lo que se descarto"
+
+
 def test_un_texto_abajo_nunca_cuenta_como_encabezado(app, monkeypatch):
     """La franja es el 12% de arriba: un 'en línea' al pie no borra nada."""
     poner_ocr(app, monkeypatch, [

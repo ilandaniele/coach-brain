@@ -429,6 +429,21 @@ def test_elegir_una_guardada_mete_su_perfil_en_el_prompt(banco):
     assert banco.creados == [], "no se creó un contacto nuevo"
 
 
+def test_una_guardada_sin_perfil_todavia_no_promete_memoria(banco):
+    """Un contacto recien creado no tiene perfil hasta el primer analisis. Ni el
+    expander de memoria tiene que aparecer, ni el prompt puede decir que la
+    conoce."""
+    banco.contactos = [{"id": "c1", "label": "Mica (gym)"}]
+    banco.perfiles = {"c1": {"label": "Mica (gym)", "profile": "", "history": []}}
+
+    at = banco.arrancar()
+    at.selectbox(key="contact_sel_tab1").select("Mica (gym)").run()
+    assert not [e for e in at.expander if "Memoria de" in e.label]
+
+    analizar(at)
+    assert "(sin historial de esta persona)" in banco.llm[0]["system"]
+
+
 def test_sin_memoria_el_system_lo_dice_explicito(banco):
     """El hueco tiene que estar nombrado: con el placeholder sin reemplazar, el
     prompt le pedía al modelo datos de una variable literal."""
@@ -545,6 +560,18 @@ def test_las_lineas_tambien_usan_el_material_del_coach(banco):
     assert "PRINC-RECUPERADO" in banco.llm[0]["user"]
 
 
+def test_con_el_rag_apagado_las_lineas_salen_igual(banco):
+    """Mismo motivo que en el Tab 1: con Qdrant caido o con el lock tomado
+    (gotcha #11), las lineas se tienen que poder generar sin material."""
+    at = banco.arrancar()
+    widget(at.checkbox, "Usar RAG").uncheck().run()
+    generar(at)
+
+    assert banco.consultas == []
+    assert banco.llm, "no se genero nada"
+    assert not [e for e in at.expander if "Coach RAG" in e.label]
+
+
 def test_el_perfil_de_la_elegida_entra_en_las_lineas(banco):
     banco.contactos = [{"id": "c1", "label": "Mica (gym)"}]
     banco.perfiles = {"c1": {"label": "Mica (gym)", "profile": "PERFIL-DE-MICA"}}
@@ -554,6 +581,19 @@ def test_el_perfil_de_la_elegida_entra_en_las_lineas(banco):
     generar(at)
 
     assert "PERFIL-DE-MICA" in banco.llm[0]["user"]
+
+
+def test_una_guardada_sin_perfil_no_mete_nada_en_las_lineas(banco):
+    """El perfil vacio no puede entrar como un encabezado "Perfil de ..." sin
+    contenido: el modelo lo lee como si la conociera y no la conoce."""
+    banco.contactos = [{"id": "c1", "label": "Mica (gym)"}]
+    banco.perfiles = {"c1": {"label": "Mica (gym)", "profile": ""}}
+
+    at = banco.arrancar()
+    at.selectbox(key="contact_sit").select("Mica (gym)").run()
+    generar(at)
+
+    assert "Perfil de" not in banco.llm[0]["user"]
 
 
 def test_las_frases_personales_entran_y_se_avisa(banco, tmp_path):

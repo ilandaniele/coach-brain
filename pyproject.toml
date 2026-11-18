@@ -77,3 +77,25 @@ ignore = ["E501"]
 # marca. Es deliberado, no un descuido: moverlos arriba rompe el script fuera del
 # venv del proyecto.
 "scripts/upload_to_qdrant_cloud.py" = ["E402"]
+
+[tool.coverage.run]
+source = ["src/coach_brain"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+# El 100% es el piso, no una meta: el repo ya esta ahi, con ramas incluidas.
+# Si algo lo baja, es porque entro codigo sin test, y eso se ve aca antes de
+# que lo tape el resto del informe. CI no mide cobertura (pytest-cov no esta
+# instalado), asi que este numero lo sostiene la corrida local:
+#   python -m coverage run -m pytest -q && python -m coverage report
+fail_under = 100
+exclude_also = [
+    # El `if __name__ == "__main__":` de cada modulo es una linea de arranque
+    # que llama a `main()`, no logica. La forma de "cubrirla" seria correr el
+    # modulo como script en un subproceso, que no prueba nada que los tests de
+    # `main()` no prueben ya, o monkeypatchear `__name__`, que es teatro.
+    # Declararlas fuera de alcance deja el porcentaje diciendo la verdad: lo
+    # que falta de verdad, falta.
+    'if __name__ == "__main__":',
+]

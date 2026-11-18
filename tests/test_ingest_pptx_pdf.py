@@ -85,6 +85,59 @@ def test_pptx_sin_notas_no_agrega_el_prefijo(tmp_path: Path):
     assert parts == ["Cliente ideal\nHombres de 20 a 35"]
 
 
+RELS_SIN_NOTAS = """<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1"
+    Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout"
+    Target="../slideLayouts/slideLayout1.xml"/>
+</Relationships>
+"""
+
+SLIDE_VACIA = """<?xml version="1.0" encoding="UTF-8"?>
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+       xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+  <p:cSld><p:spTree/></p:cSld>
+</p:sld>
+"""
+
+
+def test_pptx_un_rels_sin_notas_no_rompe_la_diapositiva(tmp_path: Path):
+    """Toda diapositiva tiene rels (el layout, las imagenes); casi ninguna tiene
+    notas. Buscar la relacion y no encontrarla es el caso normal, no un error."""
+    pptx = tmp_path / "layout.pptx"
+    with zipfile.ZipFile(pptx, "w") as z:
+        z.writestr("ppt/slides/slide1.xml", SLIDE_XML)
+        z.writestr("ppt/slides/_rels/slide1.xml.rels", RELS_SIN_NOTAS)
+
+    assert extract_pptx(pptx) == ["Cliente ideal\nHombres de 20 a 35"]
+
+
+def test_pptx_una_nota_que_el_rels_promete_y_no_esta_no_tira_el_texto(tmp_path: Path):
+    """Un .pptx reparado por PowerPoint puede quedar con la relacion y sin el
+    archivo. El texto de la diapositiva se guarda igual: perder la nota cuesta
+    menos que perder la diapositiva entera."""
+    pptx = tmp_path / "roto.pptx"
+    with zipfile.ZipFile(pptx, "w") as z:
+        z.writestr("ppt/slides/slide1.xml", SLIDE_XML)
+        z.writestr("ppt/slides/_rels/slide1.xml.rels", RELS_TMPL.format(n=7))
+        # notesSlide7.xml, que el rels nombra, NO se escribe.
+
+    parts = extract_pptx(pptx)
+    assert parts == ["Cliente ideal\nHombres de 20 a 35"]
+    assert "Notas:" not in parts[0]
+
+
+def test_pptx_una_diapositiva_sin_texto_no_entra_pero_no_corta(tmp_path: Path):
+    """Una portada con una sola imagen no aporta nada que indexar. Lo que
+    importa es que las que vienen despues igual entren."""
+    pptx = tmp_path / "portada.pptx"
+    with zipfile.ZipFile(pptx, "w") as z:
+        z.writestr("ppt/slides/slide1.xml", SLIDE_VACIA)
+        z.writestr("ppt/slides/slide2.xml", SLIDE_XML)
+
+    assert extract_pptx(pptx) == ["Cliente ideal\nHombres de 20 a 35"]
+
+
 def _make_pdf(path: Path, textos: list[str]) -> Path:
     """PDF de una pagina por elemento de `textos`."""
     pymupdf = pytest.importorskip("pymupdf")
