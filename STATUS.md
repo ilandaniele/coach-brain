@@ -105,6 +105,63 @@ corriendo es la re-destilación, que es larga pero mecánica.
 | Un transcript hecho sin VAD no se distinguía de uno normal | Cerrado. `transcribe.py` anota `vad_filter` en el metadata y `scripts/verificar.py` los lista aparte. Importa porque sin el filtro de voz Whisper alucina sobre ruido (gotcha #22), así que ese texto hay que leerlo antes de confiar en él. Cubierto con tests en `tests/test_transcribe_sin_audio.py` |
 | `finalize.ps1` podía matar la extracción en curso y volar el índice sin aviso | Cerrado. Aborta si detecta un proceso del pipeline corriendo (lista los PIDs en vez de matarlos), pide escribir `SI` antes del `--reset` salvo que se le pase `-Yes`, y agrega una segunda pasada de `kb.extract` para no perder el transcript que escribe su propio paso 1 (gotcha #15) |
 
+### Lo que se arregló el 18/11/2026
+
+**Los 154 videos de clase nunca se perdieron: se movieron.** Las tres junctions
+de `data/raw` apuntan todas a `Desktop\Ilan\Seduccion` (gotcha 7), y después de
+la ingesta el material se reorganizó una carpeta más abajo, dentro de
+`Seduccion\Bonus\`. El resultado fue que **224 de los 8.838 transcripts
+quedaron con un `source_path` que ya no resuelve**: 154 `video`, 54 `pdf`, 15
+`docx` y 1 `epub`.
+
+El inventario nunca lo notó, y por un buen motivo: `scripts/manifest.py` matchea
+por nombre y por duración sobre el árbol real, no por la ruta guardada
+(gotcha 23). Así que `INVENTARIO.md` siempre estuvo bien y el corpus siempre
+estuvo completo. El daño era **diferido**: no faltaba nada, pero cualquier etapa
+que vuelve a leer la fuente —re-transcribir sin VAD, recalcular una duración,
+re-extraer un PDF— fallaba con "no existe" sobre un archivo que está en disco.
+Es la clase de defecto que no se ve hasta que se necesita.
+
+`scripts/reparar_source_path.py` lo cerró: **219 transcripts reapuntados**, 218
+por nombre y 1 estirando el sufijo `-NNN` que agrega el pipeline
+(`78 que es el valor-008.mp4` → `78 que es el valor.mp4`). Cada uno tiene copia
+en `data/processed/_transcripts_backup_source_path/` y la ruta vieja guardada en
+`metadata.source_path_previo`. Dos detalles del diseño que importan:
+
+- **Se niega a adivinar.** Si un nombre tiene más de un candidato en disco,
+  reporta `ambiguo` y no escribe. Apuntar un transcript al archivo equivocado no
+  lo avisa nadie después.
+- **Escribe con `os.replace`.** La extracción con Ollama estaba leyendo esos
+  mismos transcripts en paralelo, y `write_text` no es atómico: un lector podía
+  haber visto un archivo truncado a mitad de camino.
+
+Después del arreglo, `manifest.py` informa **8.833 transcripts con path exacto y
+5 a resolver por nombre**, contra 224 antes.
+
+**Los 5 que quedan no son un hueco: son duplicados.** Cada uno es el mismo
+contenido que otro transcript cuyo archivo sí está en disco. La misma fuente
+entró al pipeline dos veces con nombres distintos, y después se borró una de las
+dos copias del archivo.
+
+| Transcript sin fuente | Gemelo con archivo en disco |
+|---|---|
+| `video_14 juego de texto-056` | `video_15 juego de texto-069` |
+| `video_36 Clase vip-029` | `video_36 Clase vip-095` |
+| `video_38 Clase Vip-014` | `video_38 Clase Vip-092` |
+| `video_39 Clase vip-015` | `video_39 Clase vip-091` |
+| `pdf_21-Claves-Sexualizar-Convencer (Luis Tejedor (Egoland))-2` | `pdf__21-claves-sexualisar-convenser` |
+
+Buscando sobre todo el corpus aparecen **9 grupos duplicados**, no 5: los 4
+videos de clase, 3 libros con doble nombre (`Mode One`, `Conversador
+Irresistible`, `21 Claves`) y 2 notas de voz idénticas al milisegundo. Cero
+pérdida de contenido; lo que hay es **texto repetido en el corpus y en el
+índice**, que sesga la búsqueda porque el mismo pasaje ocupa dos lugares entre
+los resultados más parecidos.
+
+**Sacar un duplicado borra datos, así que no se tocó.** `INVENTARIO.md` nombra
+los dos gemelos de cada par y `scripts/verificar.py` los lista en cada corrida.
+Es decisión de Ilan (ver gotcha 26 y "Decisiones pendientes").
+
 ### Lo que sigue corriendo
 
 Re-destilación con Ollama local (`qwen2.5:14b-instruct`, gratis), log en
@@ -511,6 +568,46 @@ hardcodeada, así que sigue funcionando si mañana se saca otra cosa del corpus.
 El resumen y el stdout informan los huecos reales aparte del total: hoy, **5
 sin cubrir y 1 hueco real** — el video truncado que necesita `untrunc`.
 
+### 26. Un `source_path` muerto no rompe nada hasta que algo relee la fuente
+
+Después de reorganizar el material dentro de `Seduccion\Bonus\`, 224
+transcripts quedaron apuntando a rutas que ya no existen. Durante semanas eso no
+produjo **un solo error**: el pipeline estaba terminado y ninguna etapa volvía a
+abrir el archivo original. El inventario tampoco se quejó, porque matchea por
+nombre y por duración sobre el árbol real.
+
+El defecto apareció recién al querer re-transcribir sin VAD un puñado de audios
+sospechosos: "el archivo no existe", sobre archivos que están en disco. Dos
+lecciones que valen para el resto del proyecto:
+
+- **Una ruta absoluta guardada en un artefacto es una dependencia con fecha de
+  vencimiento.** Sobrevive mientras nadie mueva nada, y falla en silencio
+  después. Los transcripts ahora guardan la ruta vieja en
+  `metadata.source_path_previo` cuando se los repara, así que el rastro queda.
+- **Un corpus puede estar completo y roto a la vez.** "No falta contenido" y
+  "las etapas pueden volver a correr" son dos propiedades distintas, y el
+  verificador medía solo la primera.
+
+Lo que queda sin fuente después de reparar **no es necesariamente una pérdida**.
+Antes de declarar un hueco hay que comparar contenido: los 5 restantes son
+duplicados exactos de transcripts cuyo archivo sí está en disco. El criterio de
+duplicado vive en un solo lugar, `scripts/verificar.py:es_duplicado`, y lo
+importan `manifest.py` y `reparar_source_path.py` — tener la misma tolerancia
+escrita en tres archivos termina en tres herramientas que contestan distinto
+sobre el mismo par.
+
+El criterio pide **arranque idéntico (200 caracteres) y además largo igual o
+duración igual**. Los dos pedazos hacen falta:
+
+- El arranque solo no alcanza: dos notas de voz distintas pueden empezar con la
+  misma muletilla. Agrupando por duración redondeada salen 159 grupos y casi
+  todos son casualidad.
+- El largo solo tampoco: dos pasadas de Whisper sobre el mismo video dan la
+  duración del contenedor idéntica al microsegundo (5948,7201875 s) pero largos
+  que difieren en miles de caracteres, porque el decodificado no es
+  determinista. Dos PDF idénticos, en cambio, dan el largo exacto y no tienen
+  duración.
+
 ## Costos reales
 
 | Etapa | Costo |
@@ -577,10 +674,20 @@ coach-brain/
    disco externo en lugar de borrarlo, para no perder la opción de re-transcribir.
 4. **Curación manual** — `data/curated/` sigue vacío. La idea era revisar a mano los
    principios extraídos antes de indexar; nunca se hizo. ¿Vale la pena a esta altura?
-5. **Tests** — `tests/` está vacío. El proyecto está en producción sin una sola prueba
-   automatizada.
-6. **Bot de WhatsApp** — sigue pendiente. Hoy la entrada es screenshot/texto en la web.
-7. **Fine-tuning** — descartado hasta tener >500 conversaciones etiquetadas.
+5. **Tests** — ya no está vacío: **64 tests pasando** (`.venv\Scripts\python.exe -m
+   pytest tests/ -q`). Cubren los umbrales del verificador, los cuatro motivos de "sin
+   cubrir" y el criterio de duplicado. Lo que **no** hay son tests del pipeline en sí:
+   transcripción, extracción e indexado siguen sin una sola prueba.
+6. **Los 9 grupos de contenido duplicado** — el mismo material entró al pipeline dos
+   veces con nombres distintos (4 videos de clase, 3 libros, 2 notas de voz). No falta
+   nada: sobra texto repetido en el corpus y en el índice, y eso sesga la búsqueda porque
+   el mismo pasaje ocupa dos lugares entre los resultados más parecidos.
+   `scripts/verificar.py` los lista en cada corrida e `INVENTARIO.md` nombra los dos
+   gemelos de cada par. **Sacar uno de los dos borra datos, así que no se tocó.** Si se
+   decide sacarlos hay que re-indexar con `--reset` para que el índice deje de
+   arrastrarlos.
+7. **Bot de WhatsApp** — sigue pendiente. Hoy la entrada es screenshot/texto en la web.
+8. **Fine-tuning** — descartado hasta tener >500 conversaciones etiquetadas.
 
 ---
 

@@ -13,6 +13,7 @@ Uso:  .venv\\Scripts\\python.exe scripts/manifest.py
 from __future__ import annotations
 
 import csv
+import importlib.util
 import json
 import os
 import re
@@ -33,6 +34,31 @@ DOC_EXT = {".pdf", ".docx", ".doc", ".epub", ".txt", ".rtf", ".pptx", ".xlsx"}
 IMG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".heic"}
 MEDIA_EXT = VIDEO_EXT | AUDIO_EXT | DOC_EXT | IMG_EXT
 
+
+def _criterio_de_duplicado():
+    """Trae `es_duplicado` y sus constantes desde `verificar.py`.
+
+    No se copia la regla: el verificador es el que la define y la reporta sobre
+    todo el corpus. Importarla por ruta es fea, pero `scripts/` no es un paquete
+    instalable y tener la misma tolerancia escrita en dos archivos termina en
+    dos herramientas que contestan distinto sobre el mismo par de archivos.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "verificar_criterio_duplicado", Path(__file__).resolve().parent / "verificar.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.es_duplicado, mod.CABECERA_DUPLICADO
+
+
+es_duplicado, CABECERA_DUPLICADO = _criterio_de_duplicado()
+
+
+def _huella(info: dict) -> tuple[float | None, int, str]:
+    dur = info.get("dur")
+    if not isinstance(dur, (int, float)) or not dur or dur <= 0:
+        dur = None
+    return (float(dur) if dur is not None else None, info["chars"], info.get("cabecera") or "")
 
 def kind(ext: str) -> str:
     if ext in VIDEO_EXT:
@@ -72,6 +98,7 @@ def load_transcripts():
             huerfanos.append({"transcript": tp.name, "motivo": "JSON ilegible: %s" % e})
             continue
         sp = (d.get("source_path") or "").replace("\\", "/")
+        texto = (d.get("full_text") or "").strip()
         chars = len(d.get("full_text") or "")
         ep = EXTRACTED / (tp.stem + ".extracted.json")
         items = None
@@ -91,6 +118,10 @@ def load_transcripts():
             "extraido": ep.exists(),
             "items": items,
             "dur": md.get("duration_seconds"),
+            # Para detectar si un huerfano es duplicado de otro transcript que
+            # si tiene su archivo: sin eso, el inventario informa una perdida
+            # que no existe.
+            "cabecera": texto[:CABECERA_DUPLICADO],
         }
         if not sp:
             huerfanos.append({"transcript": tp.name, "motivo": "sin source_path"})
@@ -392,13 +423,30 @@ def main() -> None:
         w.writerows(rows)
     print("Escrito %s" % out_csv)
 
+    # Los transcripts cuyo archivo si esta en disco, para buscarles gemelo.
+    con_fuente = list(by_src.values())
     for lst in by_base.values():
         for info in lst:
-            if not info.get("matched"):
-                huerfanos.append({
-                    "transcript": info["transcript"],
-                    "motivo": "fuente no esta en disco: " + info.get("source_path_declarado", "?"),
-                })
+            if info.get("matched"):
+                con_fuente.append(info)
+    for lst in by_base.values():
+        for info in lst:
+            if info.get("matched"):
+                continue
+            motivo = "fuente no esta en disco: " + info.get("source_path_declarado", "?")
+            hp = _huella(info)
+            gemelo = next(
+                (o for o in con_fuente
+                 if o["transcript"] != info["transcript"] and es_duplicado(hp, _huella(o))),
+                None,
+            )
+            if gemelo is not None:
+                motivo += (
+                    "\n  DUPLICADO de `%s`, cuyo archivo SI esta en disco: "
+                    "el contenido no se pierde, sobra texto repetido"
+                    % gemelo["transcript"]
+                )
+            huerfanos.append({"transcript": info["transcript"], "motivo": motivo})
 
     sin_cubrir = [r for r in rows if r["cubierto"] == "NO"]
     sin_extraer = [r for r in rows if r["cubierto"] == "si" and r["extraido"] == "no"]
@@ -489,7 +537,23 @@ def main() -> None:
     L.append("## Transcripts cuya fuente ya no esta en disco")
     L.append("")
     if huerfanos:
-        L.append("%d transcripts. El texto esta a salvo; el original no." % len(huerfanos))
+        n_dup = sum(1 for h in huerfanos if "DUPLICADO de" in h["motivo"])
+        if n_dup == len(huerfanos):
+            # Decir "el original no esta a salvo" seria falso si todos tienen gemelo.
+            L.append("%d transcripts cuyo `source_path` ya no resuelve." % len(huerfanos))
+        else:
+            L.append("%d transcripts. El texto esta a salvo; el original no." % len(huerfanos))
+        if n_dup:
+            L.append("")
+            L.append(
+                "De esos, **%d son duplicados**: la misma fuente entro al pipeline dos "
+                "veces con nombres distintos y despues se borro una de las dos copias "
+                "del archivo. El contenido sigue en disco bajo el otro nombre, asi que "
+                "no hay nada que recuperar. Lo que hay es texto repetido en el corpus y "
+                "en el indice, que sesga la busqueda; sacarlo borra datos y lo decide "
+                "una persona." % n_dup
+            )
+        L.append("")
         for h in huerfanos[:50]:
             L.append("- `%s` - %s" % (h["transcript"], h["motivo"]))
         if len(huerfanos) > 50:

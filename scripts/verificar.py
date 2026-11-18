@@ -101,6 +101,37 @@ CHARS_EXTRACCION_EXIGIBLE = 1500
 _MEAN_RE = re.compile(r"mean_volume:\s*(-?[\d.]+)")
 
 
+def es_duplicado(a: tuple[float | None, int, str], b: tuple[float | None, int, str]) -> bool:
+    """Dos transcripts son el mismo contenido. Cada huella es (dur, chars, cabecera).
+
+    El criterio esta aca, en un solo lugar, y lo importan `manifest.py` y
+    `reparar_source_path.py`. Tenerlo escrito dos veces es como se
+    desincroniza: el dia que alguien ajuste la tolerancia va a ajustar una sola
+    copia y las dos herramientas van a dar respuestas distintas sobre el mismo
+    par de archivos.
+
+    Pide arranque identico, y ademas largo igual o duracion igual. El arranque
+    solo no alcanza porque dos notas de voz distintas pueden empezar con la
+    misma muletilla. El largo solo tampoco, porque dos pasadas de Whisper sobre
+    el mismo video dan la duracion del contenedor identica al microsegundo pero
+    largos que difieren en miles de caracteres.
+    """
+    if not a[2] or a[2] != b[2]:
+        return False
+    if a[1] == b[1]:
+        return True
+    if a[0] is not None and b[0] is not None:
+        return abs(a[0] - b[0]) <= TOLERANCIA_DUPLICADO
+    return False
+
+
+def huella(t: dict) -> tuple[float | None, int, str]:
+    """Huella de un transcript ya cargado por `cargar()`."""
+    dur = t.get("dur")
+    if not isinstance(dur, (int, float)) or not dur or dur <= 0:
+        dur = None
+    return (float(dur) if dur is not None else None, t["chars"], t.get("cabecera") or "")
+
 def volumen_medio(path: Path):
     """mean_volume en dB segun ffmpeg, o None si no se pudo medir."""
     try:
@@ -299,8 +330,7 @@ def revisar_duplicados(ts) -> int:
         if len(lst) < 2:
             continue
         confirmado = any(
-            a["chars"] == b["chars"]
-            or (a["dur"] and b["dur"] and abs(a["dur"] - b["dur"]) <= TOLERANCIA_DUPLICADO)
+            es_duplicado(huella(a), huella(b))
             for i, a in enumerate(lst)
             for b in lst[i + 1:]
         )

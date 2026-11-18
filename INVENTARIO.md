@@ -22,8 +22,6 @@ pierde sin forma de recuperarlo.
 
 **5 archivos, 0.91 GB — de los cuales 1 es hueco real**
 
-(1 archivo(s) mas matchearon por duracion: estan renombrados en disco respecto del `source_path` del transcript, pero su contenido YA esta en el corpus. Columna `via` del CSV.)
-
 - `C:\Users\Ilan\Desktop\Proyectos\coach-brain\data\raw\docs\Bonus\4 Hablarle a una chica del trabajo, sexualiza.mp4` (0.91 GB, video) — HUECO: contenedor ilegible, ffprobe no lo puede abrir
 - `C:\Users\Ilan\Desktop\Proyectos\coach-brain\data\raw\whatsapp\00031653-VIDEO-2025-09-08-11-54-41.mp4` (0.00 GB, video) — sin pista de audio: no hay habla que transcribir
 - `C:\Users\Ilan\Desktop\Proyectos\coach-brain\data\raw\whatsapp\00033588-GIF-2025-10-03-00-26-43.mp4` (0.00 GB, video) — sin pista de audio: no hay habla que transcribir
@@ -32,7 +30,7 @@ pierde sin forma de recuperarlo.
 
 ## Con transcript pero sin extraccion
 
-302 archivos. El texto ya esta guardado en `data/processed/transcripts/`;
+301 archivos. El texto ya esta guardado en `data/processed/transcripts/`;
 falta destilarlo. Para eso no hace falta el archivo original.
 
 ## Con extraccion vacia (0 items)
@@ -58,10 +56,18 @@ que el pipeline todavia no lee. Conviene revisarlo antes de borrar nada.
 
 ## Transcripts cuya fuente ya no esta en disco
 
-5 transcripts. El texto esta a salvo; el original no.
+5 transcripts cuyo `source_path` ya no resuelve.
+
+De esos, **5 son duplicados**: la misma fuente entro al pipeline dos veces con nombres distintos y despues se borro una de las dos copias del archivo. El contenido sigue en disco bajo el otro nombre, asi que no hay nada que recuperar. Lo que hay es texto repetido en el corpus y en el indice, que sesga la busqueda; sacarlo borra datos y lo decide una persona.
+
 - `pdf_21-Claves-Sexualizar-Convencer (Luis Tejedor (Egoland))-2.json` - fuente no esta en disco: data/raw/pdfs/Libros de Ganso a Gavilan/Seduccion/21-Claves-Sexualizar-Convencer (Luis Tejedor (Egoland))-2.pdf
+  DUPLICADO de `pdf__21-claves-sexualisar-convenser.json`, cuyo archivo SI esta en disco: el contenido no se pierde, sobra texto repetido
 - `video_14 juego de texto-056.json` - fuente no esta en disco: data/raw/videos/14 juego de texto-056.mp4
+  DUPLICADO de `video_15 juego de texto-069.json`, cuyo archivo SI esta en disco: el contenido no se pierde, sobra texto repetido
 - `video_36 Clase vip-029.json` - fuente no esta en disco: data/raw/videos/Clases VIP/36 Clase vip-029.mp4
+  DUPLICADO de `video_36 Clase vip-095.json`, cuyo archivo SI esta en disco: el contenido no se pierde, sobra texto repetido
 - `video_38 Clase Vip-014.json` - fuente no esta en disco: data/raw/videos/Clases VIP/38 Clase Vip-014.mp4
+  DUPLICADO de `video_38 Clase Vip-092.json`, cuyo archivo SI esta en disco: el contenido no se pierde, sobra texto repetido
 - `video_39 Clase vip-015.json` - fuente no esta en disco: data/raw/videos/Clases VIP/39 Clase vip-015.mp4
+  DUPLICADO de `video_39 Clase vip-091.json`, cuyo archivo SI esta en disco: el contenido no se pierde, sobra texto repetido
 

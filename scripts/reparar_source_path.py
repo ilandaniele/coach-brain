@@ -69,6 +69,7 @@ auditable desde el propio archivo.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -97,8 +98,23 @@ TOLERANCIA_DURACION = 1.0
 # largo total. Dos transcripts de Whisper de un mismo video no dan el mismo
 # largo (cada corrida reparte distinto el texto), pero la duracion del
 # contenedor es identica al microsegundo. Dos PDF iguales dan el mismo largo.
-CABECERA_DUPLICADO = 200
-TOLERANCIA_DUPLICADO = 0.01
+
+def _criterio_de_duplicado():
+    """Trae `es_duplicado` y sus constantes desde `verificar.py`.
+
+    El criterio no se copia: vive en el verificador, que es el que lo reporta
+    sobre todo el corpus. Importarlo por ruta es fea pero honesta, porque
+    `scripts/` no es un paquete instalable y no hay un lugar mejor todavia.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "verificar_criterio_duplicado", Path(__file__).resolve().parent / "verificar.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.es_duplicado, mod.CABECERA_DUPLICADO, mod.TOLERANCIA_DUPLICADO
+
+
+es_duplicado, CABECERA_DUPLICADO, TOLERANCIA_DUPLICADO = _criterio_de_duplicado()
 
 
 def _real(p: Path) -> str:
@@ -179,17 +195,6 @@ def huella(d: dict) -> tuple[float | None, int, str]:
     if not isinstance(dur, (int, float)) or not dur or dur <= 0:
         dur = None
     return (float(dur) if dur is not None else None, len(t), t[:CABECERA_DUPLICADO])
-
-
-def es_duplicado(a: tuple[float | None, int, str], b: tuple[float | None, int, str]) -> bool:
-    """Mismo contenido: arranque identico y ademas misma duracion o mismo largo."""
-    if not a[2] or a[2] != b[2]:
-        return False
-    if a[1] == b[1]:
-        return True
-    if a[0] is not None and b[0] is not None:
-        return abs(a[0] - b[0]) <= TOLERANCIA_DUPLICADO
-    return False
 
 
 def main() -> int:
