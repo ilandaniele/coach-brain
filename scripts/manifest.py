@@ -16,6 +16,7 @@ import csv
 import json
 import os
 import re
+import subprocess
 from collections import defaultdict
 from pathlib import Path
 
@@ -81,12 +82,14 @@ def load_transcripts():
                 )
             except Exception:  # noqa: BLE001
                 items = -1
+        md = d.get("metadata") or {}
         info = {
             "transcript": tp.name,
             "source_type": d.get("source_type") or "",
             "chars": chars,
             "extraido": ep.exists(),
             "items": items,
+            "dur": md.get("duration_seconds"),
         }
         if not sp:
             huerfanos.append({"transcript": tp.name, "motivo": "sin source_path"})
@@ -162,6 +165,69 @@ def ocr_coverage():
     return names
 
 
+def _dur_ffprobe(path: str):
+    """Duracion en segundos segun ffprobe, o None si no se puede leer."""
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=nw=1:nk=1", path],
+            capture_output=True, text=True, timeout=120,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    try:
+        return float((r.stdout or "").strip())
+    except ValueError:
+        return None
+
+
+def match_por_duracion(hits, by_base, tol: float = 1.0) -> int:
+    """Tercer pase de matcheo de fuentes: por duracion del audio.
+
+    Un archivo renombrado en disco no matchea ni por path ni por nombre, y el
+    inventario lo cuenta como material sin transcribir. Eso paso con una clase
+    de 2 horas y 3.4 GB que SI estaba transcripta: en disco se llama
+    "78 que es el valor.mp4" y el transcript apunta a
+    "78 que es el valor-008.mp4". Un falso "no lo tengo" de ese tamano es
+    justo el error que no se puede cometer antes de borrar material.
+
+    La duracion es la huella mas barata disponible: el transcript ya la
+    guarda y ffprobe la lee del contenedor sin decodificar el archivo. Solo
+    se prueba sobre lo que quedo sin cubrir, que son unos pocos archivos.
+    """
+    pend = [h for h in hits if h[1] is None and h[0]["kind"] in ("video", "audio")]
+    sueltos = [
+        info
+        for lst in by_base.values()
+        for info in lst
+        if isinstance(info.get("dur"), (int, float)) and info["dur"] > 0
+    ]
+    if not pend or not sueltos:
+        return 0
+    print("  %d sin cubrir y %d transcript(s) sin fuente: pruebo por duracion..."
+          % (len(pend), len(sueltos)))
+    n = 0
+    for h in pend:
+        d = _dur_ffprobe(h[0]["path"])
+        if d is None:
+            continue
+        mejor = min(sueltos, key=lambda i: abs(i["dur"] - d))
+        if abs(mejor["dur"] - d) > tol:
+            continue
+        mejor["matched"] = True
+        sueltos.remove(mejor)
+        for lst in by_base.values():
+            if mejor in lst:
+                lst.remove(mejor)
+                break
+        h[1] = mejor
+        h[2] = "transcript (por duracion)"
+        n += 1
+        print("    %s  <->  %s  (%.1fs)" % (
+            os.path.basename(h[0]["path"]), mejor["transcript"], d))
+    return n
+
+
 def gb(b: int) -> str:
     return "%.2f GB" % (b / 1024.0 ** 3)
 
@@ -179,8 +245,7 @@ def main() -> None:
 
     ocr = ocr_coverage()
 
-    rows = []
-    stats = defaultdict(lambda: {"n": 0, "bytes": 0, "cub": 0, "cub_bytes": 0})
+    hits = []
     for k, f in sorted(disk.items(), key=lambda kv: kv[1]["path"]):
         info = by_src.get(k)
         via = "transcript"
@@ -190,6 +255,13 @@ def main() -> None:
                 info = cand.pop(0)
                 info["matched"] = True
                 via = "transcript (por nombre)"
+        hits.append([f, info, via])
+
+    n_dur = match_por_duracion(hits, by_base)
+
+    rows = []
+    stats = defaultdict(lambda: {"n": 0, "bytes": 0, "cub": 0, "cub_bytes": 0})
+    for f, info, via in hits:
         cubierto = info is not None
         if not cubierto and f["kind"] == "imagen":
             if Path(f["path"]).stem.lower() in ocr:
@@ -262,6 +334,12 @@ def main() -> None:
     L.append("")
     if sin_cubrir:
         L.append("**%d archivos, %s**" % (len(sin_cubrir), gb(sum(max(0, r["bytes"]) for r in sin_cubrir))))
+        if n_dur:
+            L.append("")
+            L.append("(%d archivo(s) mas matchearon por duracion: estan "
+                     "renombrados en disco respecto del `source_path` del "
+                     "transcript, pero su contenido YA esta en el corpus. "
+                     "Columna `via` del CSV.)" % n_dur)
         L.append("")
         for r in sorted(sin_cubrir, key=lambda r: -max(0, r["bytes"]))[:200]:
             L.append("- `%s` (%s, %s)" % (r["path"], gb(max(0, r["bytes"])), r["tipo"]))
