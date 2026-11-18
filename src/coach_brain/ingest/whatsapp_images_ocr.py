@@ -16,7 +16,9 @@ target que la versión vision, así el resto del pipeline no cambia).
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -107,16 +109,41 @@ def _ocr_image(ocr, path: Path) -> dict:
 def run(limit: int = 0) -> None:
     from rapidocr_onnxruntime import RapidOCR
 
+    # `whatsapp` es el export; `docs` es la junction al material, que tambien
+    # tiene capturas de conversaciones (Bonus/Interacciones/Mensaje/...).
+    # Sin esa segunda raiz esas capturas nunca pasaban por OCR.
     wa_dir = settings.raw_path / "whatsapp"
+    extra_dirs = [settings.raw_path / "docs", settings.raw_path / "screenshots"]
     if not wa_dir.exists():
         console.print(f"[yellow]No existe {wa_dir}[/yellow]")
         return
 
-    images = sorted(p for p in wa_dir.rglob("*") if p.suffix.lower() in IMG_EXT)
     out_dir = settings.processed_path / "whatsapp_images_ocr"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    pending = [p for p in images if not (out_dir / f"{p.stem}.json").exists()]
+    # Las imagenes del export conservan el nombre de salida historico
+    # (`<stem>.json`). Las de las raices extra llevan un sufijo derivado del
+    # path, porque ahi los nombres se repiten entre carpetas ("1.png",
+    # "meli 1.png") y un solo stem pisaria a otro.
+    found: dict[str, Path] = {}
+    for root in [wa_dir, *extra_dirs]:
+        if not root.exists():
+            continue
+        for p in root.rglob("*"):
+            if p.suffix.lower() not in IMG_EXT:
+                continue
+            found.setdefault(os.path.normcase(os.path.realpath(str(p))), p)
+    images = sorted(found.values())
+
+    def _out_name(p: Path) -> str:
+        try:
+            p.relative_to(wa_dir)
+            return f"{p.stem}.json"
+        except ValueError:
+            h = hashlib.md5(os.path.normcase(str(p)).encode("utf-8")).hexdigest()[:8]
+            return f"{p.stem}__{h}.json"
+
+    pending = [p for p in images if not (out_dir / _out_name(p)).exists()]
     if limit > 0:
         pending = pending[:limit]
     console.print(f"[cyan]Imágenes: {len(images)} total, {len(pending)} pendientes (OCR local)[/cyan]")
@@ -127,10 +154,15 @@ def run(limit: int = 0) -> None:
     counts = {"chat": 0, "other": 0, "err": 0}
     total = len(pending)
     for i, p in enumerate(pending, 1):
-        out_path = out_dir / f"{p.stem}.json"
+        out_path = out_dir / _out_name(p)
         try:
             data = _ocr_image(ocr, p)
-            data["source_file"] = p.name
+            # Para las raices extra el nombre solo no alcanza para saber de
+            # que conversacion salio ("1.png"), asi que guardamos el path.
+            try:
+                data["source_file"] = str(p.relative_to(settings.raw_path))
+            except ValueError:
+                data["source_file"] = p.name
             out_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
             counts["chat" if data["es_chat"] else "other"] += 1
         except Exception as e:  # noqa: BLE001

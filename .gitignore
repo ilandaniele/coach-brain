@@ -29,6 +29,7 @@ data/curated/**
 
 # Qdrant local storage
 qdrant_storage/
+qdrant_storage.bak/
 *.qdrant
 
 # Models cache (HuggingFace, Whisper)

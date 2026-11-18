@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -23,8 +24,47 @@ def _relpath(p: Path) -> str:
         return str(p)
 
 
-def extract_pdf(path: Path) -> dict:
-    """Extrae texto de un PDF, con fallback a pymupdf si pypdf no obtiene texto."""
+_OCR_ENGINE = None
+
+
+def _ocr_pages(path: Path, dpi: int = 200) -> list[str]:
+    """Rasteriza cada pagina y le pasa OCR local (RapidOCR).
+
+    Es el ultimo recurso, para los PDFs escaneados: pypdf y pymupdf no
+    devuelven nada porque el archivo son imagenes, no texto. Cuesta varios
+    segundos por pagina, asi que solo corre con --ocr.
+    """
+    global _OCR_ENGINE
+
+    import numpy as np
+    import pymupdf  # type: ignore
+
+    if _OCR_ENGINE is None:
+        from rapidocr_onnxruntime import RapidOCR
+
+        _OCR_ENGINE = RapidOCR()
+
+    zoom = dpi / 72.0
+    out: list[str] = []
+    doc = pymupdf.open(path)
+    try:
+        for page in doc:
+            pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom))
+            img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(
+                pix.height, pix.width, pix.n
+            )
+            if pix.n == 4:  # RGBA -> RGB, RapidOCR no acepta canal alfa
+                img = img[:, :, :3]
+            result, _ = _OCR_ENGINE(img)
+            lines = [r[1] for r in (result or []) if r and len(r) > 1 and r[1]]
+            out.append("\n".join(lines).strip())
+    finally:
+        doc.close()
+    return out
+
+
+def extract_pdf(path: Path, ocr: bool = False) -> dict:
+    """Extrae texto de un PDF: pypdf, luego pymupdf, y con --ocr rasteriza."""
     reader = PdfReader(path)
     n_pages = len(reader.pages)
     segments: list[dict] = []
@@ -53,6 +93,20 @@ def extract_pdf(path: Path) -> dict:
         except Exception as e:  # noqa: BLE001
             console.print(f"[yellow]pymupdf fallback falló: {e}[/yellow]")
 
+    engine = "texto"
+    if not segments and ocr:
+        console.print(f"[cyan]OCR sobre {n_pages} páginas de {path.name}...[/cyan]")
+        try:
+            for i, text in enumerate(_ocr_pages(path)):
+                if text:
+                    segments.append(
+                        {"id": i, "text": text, "start": None, "end": None, "page": i + 1}
+                    )
+                    full_text_parts.append(text)
+            engine = "rapidocr"
+        except Exception as e:  # noqa: BLE001
+            console.print(f"[red]OCR falló en {path.name}: {e}[/red]")
+
     return {
         "source_id": f"pdf_{path.stem}",
         "source_type": "pdf",
@@ -60,20 +114,33 @@ def extract_pdf(path: Path) -> dict:
         "title": path.stem,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "language": settings.whisper_language,
-        "metadata": {"pages": n_pages, "duration_seconds": None},
+        "metadata": {"pages": n_pages, "duration_seconds": None, "engine": engine},
         "segments": segments,
         "full_text": "\n\n".join(full_text_parts),
     }
 
 
-def run(force: bool = False) -> None:
-    pdf_dir = settings.raw_path / "pdfs"
+def run(force: bool = False, ocr: bool = False) -> None:
+    # `pdfs` es una junction al material; `whatsapp` es un directorio real y
+    # tambien tiene PDFs, los que llegaron adjuntos en los chats. Sin esta
+    # segunda raiz esos adjuntos nunca entraban al pipeline.
+    roots = [settings.raw_path / "pdfs", settings.raw_path / "whatsapp"]
     out_dir = settings.transcripts_path
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    pdfs = sorted(p for p in pdf_dir.rglob("*") if p.suffix.lower() == ".pdf")
+    # Las junctions de data/raw pueden apuntar al mismo arbol, asi que
+    # deduplicamos por path canonico antes de procesar.
+    found: dict[str, Path] = {}
+    for root in roots:
+        if not root.exists():
+            continue
+        for p in root.rglob("*"):
+            if p.suffix.lower() != ".pdf":
+                continue
+            found.setdefault(os.path.normcase(os.path.realpath(str(p))), p)
+    pdfs = sorted(found.values())
     if not pdfs:
-        console.print(f"[yellow]No hay PDFs en {pdf_dir}[/yellow]")
+        console.print(f"[yellow]No hay PDFs en {', '.join(str(r) for r in roots)}[/yellow]")
         return
 
     console.print(f"[cyan]Procesando {len(pdfs)} PDF(s)...[/cyan]")
@@ -85,9 +152,12 @@ def run(force: bool = False) -> None:
             skip += 1
             continue
         try:
-            data = extract_pdf(pdf_path)
+            data = extract_pdf(pdf_path, ocr=ocr)
             if not data["segments"]:
-                console.print(f"[yellow]Sin texto extraíble (¿escaneado?): {pdf_path.name}[/yellow]")
+                console.print(
+                    f"[yellow]Sin texto extraíble (¿escaneado?): {pdf_path.name}"
+                    f"{'' if ocr else ' — reintentá con --ocr'}[/yellow]"
+                )
                 empty += 1
                 continue
             out_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
