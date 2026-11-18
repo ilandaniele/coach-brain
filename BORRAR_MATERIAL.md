@@ -22,29 +22,64 @@ regenera cuando quieras con:
 .venv\Scripts\python.exe scripts/manifest.py
 ```
 
-## ¿Se puede borrar hoy? (estado al 18/11, 13:00)
+## ¿Se puede borrar hoy? (estado al 18/11, 13:10)
 
-No todavía, y falta poco. De las 17.801 fuentes, **17.796 están cubiertas** y de
-las 5 que no, **una sola es contenido que se pierde**. Lo que falta para que
-borrar deje de perder algo recuperable:
+**El hueco se cerró.** `untrunc` recuperó la clase truncada y ya está
+transcripta: 1592 segmentos, 39.500 caracteres, 50min 17s de audio, castellano
+con probabilidad 1,0. El corpus pasó de 8838 a **8839 transcripts**, y ya no
+queda ninguna fuente con contenido sin cubrir.
+
+De las 17.801 fuentes, las 4 que siguen en `NO` no son contenido perdido:
+
+| Fuente | Por qué no se cubre |
+|---|---|
+| `00031653-VIDEO-2025-09-08-11-54-41.mp4` | sin pista de audio: no hay habla que transcribir |
+| `00033588-GIF-2025-10-03-00-26-43.mp4` | ídem |
+| `00021049-CV_divertido_Ilan_Daniele.pdf` | excluido a propósito: es tu CV, no material del coach |
+| `00021052-CV_divertido_Ilan_Daniele_coqueto.pdf` | ídem |
+
+Lo que falta no necesita el material crudo:
 
 | Condición | Estado |
 |---|---|
-| Que el inventario no liste ningún `HUECO` | **Falta 1**: `4 Hablarle a una chica del trabajo, sexualiza.mp4` (0,91 GB). Necesita tu `untrunc` (abajo), o tu decisión de dejar la clase afuera |
-| Que la re-destilación con Ollama termine | **En curso**: 8544 de 8823 extracciones. Termina alrededor del 20/11 a la noche |
+| Que no quede ningún `HUECO` | **Hecho**, 18/11 13:06 |
+| Que la re-destilación con Ollama termine | **En curso**: 8546 de 8823. Termina alrededor del 20/11 a la noche |
 | Que el índice se reconstruya y la app lo sirva | **Falta**: `kb.index --reset` + `flyctl deploy` cuando la extracción cierre |
 | Que el inventario se regenere y confirme lo anterior | **Falta**: `scripts/manifest.py`, después del índice |
 
-Las tres últimas **no necesitan el material crudo**: la extracción corre sobre
-`transcripts/`, el índice sobre `extracted/`, y el inventario solo lee tamaños y
-duraciones. O sea que el único motivo real para no borrar hoy es el primero: el
-video truncado, y las dos pérdidas permanentes que no son un archivo —la
-posibilidad de re-transcribir con un modelo mejor, y todo lo visual—. Las dos
-están explicadas abajo.
+La extracción corre sobre `transcripts/`, el índice sobre `extracted/`, y el
+inventario solo lee tamaños y duraciones. Ninguno abre un video.
 
-Mientras eso siga abierto, **no se borra nada**. La recomendación es mover el
-material a un disco externo: conserva las tres opciones por el precio de un
-disco de 1 TB.
+### Lo único que hay que hacer antes de borrar
+
+El archivo recuperado, `roto.mp4_fixed.mp4` (969.451.760 bytes), está en el
+scratchpad de la sesión de Claude:
+
+```
+C:\Users\Ilan\AppData\Local\Temp\claude\761b3e6a4181af87\cf70a6bc-7876-4422-a8de-f326e9711069\scratchpad\untrunc\roto.mp4_fixed.mp4
+```
+
+Ese directorio se limpia solo. Mientras el original roto siga existiendo no
+importa, porque `untrunc` se puede volver a correr. Pero si se borra el material
+crudo con el recuperado todavía en el scratchpad, la clase deja de poder verse
+para siempre: no queda ni el archivo arreglado ni el roto del que salió. **Copiar
+`roto.mp4_fixed.mp4` a un lugar durable es el paso previo a cualquier borrado.**
+
+### Y las dos pérdidas que ningún paso puede devolver
+
+1. **Re-transcribir con un modelo mejor.** Hoy el corpus es `large-v3`. Si sale
+   algo mejor y el material no está, los transcripts actuales son el techo.
+2. **Todo lo visual.** El corpus es solo texto: el lenguaje corporal, los gestos
+   y lo que se ve en pantalla en una demostración no quedaron indexados, y no se
+   derivan del transcript.
+
+Las dos valen para los 358 GB enteros, no para un archivo. Por eso la
+recomendación sigue siendo **mover el material a un disco externo en vez de
+borrarlo**: un disco de 1 TB conserva las dos opciones, y el conocimiento
+destilado que sirve la app son 670 MB que ya están en el repo.
+
+**Borrar no está autorizado.** Esta sección dice que ya no hay un impedimento
+técnico, no que haya que hacerlo.
 
 ## Antes de borrar nada
 
