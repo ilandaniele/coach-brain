@@ -3,7 +3,7 @@
 > Documento de handoff. Si arrancás una sesión Claude nueva, leé esto primero antes de avanzar.
 
 **Última actualización:** 2026-11-17 22:30
-**Estado general:** Pipeline de ingesta **terminado** y app **desplegada en Fly.io**. El índice que está sirviendo hoy tiene 38.343 vectores y no incluye los libros más grandes. Los huecos de aguas arriba (PDFs que llegaron por WhatsApp, capturas sin OCR, el PDF escaneado) ya están **cerrados en código y en disco**. Lo que queda corriendo es la re-destilación de 301 fuentes con Ollama local: unas **49 horas** a 43,4 segundos por chunk, medido sobre el log de Ollama. Ver [Huecos del corpus](#huecos-del-corpus-en-curso-2026-11-17).
+**Estado general:** Pipeline de ingesta **terminado** y app **desplegada en Fly.io**. El índice que está sirviendo hoy tiene 38.343 vectores y no incluye los libros más grandes. Los huecos de aguas arriba (PDFs que llegaron por WhatsApp, capturas sin OCR, el PDF escaneado) ya están **cerrados en código y en disco**. Lo que queda corriendo es la re-destilación de 301 fuentes con Ollama local (medidas el 17/11 a las 22:25): unas **49 horas** a 43,4 segundos por chunk, medido sobre el log de Ollama. Ver [Huecos del corpus](#huecos-del-corpus-en-curso-2026-11-17).
 
 ---
 
@@ -38,23 +38,30 @@ Overview y setup en `README.md`. Este archivo es el estado operativo y los gotch
 
 ## Pipeline de ingesta — TERMINADO
 
-No hay nada que re-transcribir. Conteos verificados en disco (2026-11-17):
+No hay nada que re-transcribir. Conteos verificados en disco (2026-11-17, 23:50):
 
 | Etapa | Salida | Cantidad |
 |---|---|---|
-| Transcripción | `data/processed/transcripts/*.json` | **8823** |
-| Extracción LLM | `data/processed/extracted/*.json` | **8823** (1:1, pero 3184 vacíos — ver abajo) |
-| Índice Qdrant | `qdrant_storage/` | **38.343** vectores |
+| Transcripción | `data/processed/transcripts/*.json` | **8838** |
+| Extracción LLM | `data/processed/extracted/*.json` | **8535**, más 303 en curso con Ollama |
+| Índice Qdrant | `qdrant_storage/` | **38.343** vectores, del índice viejo |
 
-Desglose de las 8823 fuentes:
+Los 303 que faltan no son un hueco nuevo: 250 son extracciones que se mandaron a
+re-destilar a propósito (`data/processed/_reextraer/`: 244 notas de WhatsApp y 5 PDF
+reconstruidos), 44 estaban vacías y quedaron respaldadas en `_extracted_empty_backup/`,
+y el resto son transcripts nuevos. El índice que sirve hoy se armó antes de todo esto,
+así que todavía no los tiene: hay que reconstruirlo cuando la extracción termine.
+
+Desglose de las 8838 fuentes:
 
 | Tipo | Cantidad | Detalle |
 |---|---|---|
 | `wa_audio` | 8396 | notas de voz de WhatsApp (.opus/.m4a/.mp3), Whisper local |
-| `wa_video` | 193 | videos de WhatsApp (de 195 en disco; 2 fallaron) |
-| `video` | 154 | clases del curso (de 155; 1 falló por ffmpeg) |
-| `pdf` | 62 | libros y manuales |
-| `docx` | 15 | |
+| `wa_video` | 193 | videos de WhatsApp (de 195 en disco; los 2 que faltan no tienen pista de audio) |
+| `video` | 154 | clases del curso (de 155; al que falta se le truncó el contenedor) |
+| `pdf` | 75 | libros y manuales (eran 62: +13 al cerrarse el hueco de los que llegaron por WhatsApp) |
+| `docx` | 16 | |
+| `pptx` | 1 | |
 | `whatsapp` | 2 | exports de chat parseados (38.029 mensajes Ema↔Ilan) + imágenes-chat OCR agregadas |
 | `epub` | 1 | |
 
@@ -495,7 +502,7 @@ sin cubrir y 1 hueco real** — el video truncado que necesita `untrunc`.
 
 | Etapa | Costo |
 |---|---|
-| Transcripción (8823 fuentes, Whisper local GPU) | $0 |
+| Transcripción (8838 fuentes, Whisper local GPU) | $0 |
 | OCR de 8953 imágenes (RapidOCR local) | $0 |
 | Extracción LLM (Ollama/qwen2.5:14b local) | $0 |
 | Embeddings (bge-m3 local) | $0 |
@@ -521,8 +528,8 @@ coach-brain/
 │   │   ├── whatsapp/             ← real: 195 mp4, 8310 .opus, 8933 .jpg
 │   │   └── _drive_dump/          ← vacío
 │   ├── processed/
-│   │   ├── transcripts/      ← 8823 JSON unificados
-│   │   ├── extracted/        ← 8823 .extracted.json (3184 vacíos)
+│   │   ├── transcripts/      ← 8838 JSON unificados
+│   │   ├── extracted/        ← 8535 .extracted.json (+303 en curso)
 │   │   ├── whatsapp_images_ocr/  ← 8953 salidas de RapidOCR
 │   │   └── whatsapp_images/
 │   └── curated/              ← vacío (curación manual nunca se hizo)
