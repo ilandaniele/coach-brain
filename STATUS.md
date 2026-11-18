@@ -94,6 +94,8 @@ corriendo es la re-destilación, que es larga pero mecánica.
 | 3,43 GB reportados como material sin transcribir que en realidad estaba hecho | Cerrado. `78 que es el valor.mp4` perdió el sufijo `-008` en disco y por eso no matcheaba ni por path ni por nombre contra `video_78 que es el valor-008.json`, que tiene 108.793 caracteres. `scripts/manifest.py` tiene ahora un tercer pase que matchea por duración del audio con ffprobe, tolerancia de 1 segundo (gotcha #23). Cubierto con tests en `tests/test_manifest_duracion.py` |
 | Dos videos de WhatsApp que fallaban con `tuple index out of range` | Cerrado. No tienen pista de audio: no hay nada que transcribir. `ingest/transcribe.py` ahora lo detecta con ffprobe antes de llamar a Whisper, los saltea con un mensaje claro y los cuenta aparte (`sin_audio=N` en el resumen) |
 | 11 PDFs, 2,4 millones de caracteres de libros enteros, indexados como una tira de glifos sin espacios | Cerrado, y es el hueco más grande que apareció. `pypdf.extract_text()` no reconstruye los espacios cuando el PDF los implementa como posicionamiento: devuelve la cantidad correcta de caracteres, así que pasa cualquier control de volumen, pero el texto es `Estoesparaquevayasdiaadia`. pymupdf sí los reconstruye, por geometría, y era solo el fallback de "no salió nada". Ahora `ingest/pdfs.py` compara la proporción de espacios y gana el mejor (gotcha #24). Los 11 se rehicieron: `El poder de los hábitos` pasó de 0,0008 a 0,1487 de espacios, `Basta ya de ser un tipo lindo` y `Mejorando las charlas` de 0,0000 a 0,1536 y 0,1503. Mínimo del corpus ahora: 0,1081. Cubierto con tests en `tests/test_ingest_pptx_pdf.py` |
+| El inventario decía que los 5 archivos sin cubrir se perdían, y de 4 de los 5 era falso | Cerrado. `scripts/manifest.py` escribe ahora el motivo de cada uno y lo comprueba en la corrida: `sin pista de audio` (ffprobe no encuentra ninguna), `contenedor ilegible`, `excluido a propósito` (el transcript está en `_fuera_del_corpus/`) o `HUECO` de verdad. Informa los huecos reales aparte del total (gotcha #25). Hoy: **1 hueco real**, el video truncado que necesita `untrunc` |
+| Un transcript hecho sin VAD no se distinguía de uno normal | Cerrado. `transcribe.py` anota `vad_filter` en el metadata y `scripts/verificar.py` los lista aparte. Importa porque sin el filtro de voz Whisper alucina sobre ruido (gotcha #22), así que ese texto hay que leerlo antes de confiar en él. Cubierto con tests en `tests/test_transcribe_sin_audio.py` |
 | `finalize.ps1` podía matar la extracción en curso y volar el índice sin aviso | Cerrado. Aborta si detecta un proceso del pipeline corriendo (lista los PIDs en vez de matarlos), pide escribir `SI` antes del `--reset` salvo que se le pase `-Yes`, y agrega una segunda pasada de `kb.extract` para no perder el transcript que escribe su propio paso 1 (gotcha #15) |
 
 ### Lo que sigue corriendo
@@ -147,6 +149,14 @@ encuentra algo sospechoso, así que sirve de gate. Revisa:
    las que vienen de un transcript de 1.500 caracteres o más, que son las que
    no deberían estar vacías.
 6. Extracciones cuyo transcript ya no existe.
+
+Además lista aparte, **sin contarlos como sospechosos**, los transcripts hechos
+sin VAD (`metadata.vad_filter == false`). No son un hueco: el flag se usa a
+propósito para auditar un transcript vacío. Pero sin el filtro de voz Whisper
+alucina frases de su corpus de entrenamiento sobre música y ruido (gotcha #22),
+así que ese texto hay que leerlo antes de confiar en él, y el que corra el
+pipeline mañana no tiene otra forma de saber cuál es cuál. Hoy aparece uno:
+`wa_audio_00027726`, la grabación de campo que sí se recuperó.
 
 ```powershell
 .venv\Scripts\python.exe -I -X utf8 scripts/verificar.py
@@ -450,6 +460,28 @@ detectar lo que ya está escrito en disco.
 Esto no es mojibake: los caracteres de reemplazo (`�`) del corpus son 0 en
 todos los transcripts. El `�` que aparece en la terminal es el renderizado
 cp1252 de la consola (gotcha #5), no el archivo.
+
+### 25. "Sin cubrir" no significa "se pierde": hay cuatro motivos distintos
+
+`INVENTARIO.md` es el registro sobre el que se decide si el material crudo se
+borra, y durante un tiempo dijo de los cinco archivos sin cubrir que "su
+contenido se pierde y no hay forma de recuperarlo". De cuatro de los cinco era
+falso, y el registro servía para lo contrario de lo que se escribió.
+
+`scripts/manifest.py` ahora escribe el motivo de cada uno, y lo **comprueba** en
+la corrida en vez de darlo por sabido:
+
+| Motivo | Cómo se detecta | ¿Se pierde algo? |
+|---|---|---|
+| `sin pista de audio` | `ffprobe -select_streams a` no devuelve ningún índice | No: es un GIF o un video grabado con el micrófono apagado |
+| `contenedor ilegible` | ffprobe falla al abrir el archivo | **Sí.** Es el único caso que hay que atender |
+| `excluido a propósito` | hay un transcript con ese stem en `data/processed/_fuera_del_corpus/` | No: el material es ruido para el corpus, el texto está guardado |
+| `HUECO: falta procesarlo` | ninguno de los anteriores | **Sí** |
+
+La exclusión se detecta por la presencia del archivo, no por una lista
+hardcodeada, así que sigue funcionando si mañana se saca otra cosa del corpus.
+El resumen y el stdout informan los huecos reales aparte del total: hoy, **5
+sin cubrir y 1 hueco real** — el video truncado que necesita `untrunc`.
 
 ## Costos reales
 
