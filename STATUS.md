@@ -907,8 +907,15 @@ coach-brain/
    lo que devuelve la búsqueda: **lo decide Ilan después de leer el texto.** El
    candidato fuerte es `wa_audio_00032678` (+6.189 caracteres contra la versión con
    VAD); el segundo, `wa_audio_00021741` (+1.352, diálogo de campo real).
-8. **Bot de WhatsApp** — sigue pendiente. Hoy la entrada es screenshot/texto en la web.
-9. **Fine-tuning** — descartado hasta tener >500 conversaciones etiquetadas.
+8. **`wa_audio_00021896` en el corpus vivo** — 1.907 caracteres de `"¡Gracias por
+   ver el video!"` repetido 25 veces, el único de los 8.838 que junta las dos señales
+   del detector. **Hoy no está en el índice**: su extracción se movió a `_reextraer/`
+   y la corrida con Ollama todavía no llegó. Si cuando llegue saca items, hay algo que
+   decidir y el paso 6 de `finalize.ps1` lo va a imprimir como `HAY QUE DECIDIR`; si
+   saca 0, el extractor ya lo filtró y no hay nada que hacer. Sacar un transcript del
+   corpus lo decide Ilan.
+9. **Bot de WhatsApp** — sigue pendiente. Hoy la entrada es screenshot/texto en la web.
+10. **Fine-tuning** — descartado hasta tener >500 conversaciones etiquetadas.
 
 ---
 
