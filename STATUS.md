@@ -683,7 +683,7 @@ Cada comando empieza con el path por defecto. Siempre absoluto y refrescar PATH 
 Console default de Windows rompe con caracteres Unicode (✓, ✗, emojis en código). Setear `$env:PYTHONIOENCODING = "utf-8"` antes de correr scripts que renderizan texto. Los logs en `logs\` quedaron en UTF-16 por el Tee-Object de PowerShell: para leerlos desde Bash, `tr -d '\0'`.
 
 ### 6. Drive: gdown no acepta carpetas "Restricted"
-Devuelve HTTP 401 (`data/_drive_download.log`). Permiso necesario: "Anyone with the link". Ya no aplica — el material está local, y **no hay** copia en Drive accesible: la local es la única.
+Devuelve HTTP 401 (`data/_drive_download.log`). Permiso necesario: "Anyone with the link". Lo que esta prueba falsea es la descarga **programática** con `gdown`, no la existencia de la copia: Ilan confirmó el 19/11 que el material está subido a un Drive suyo, al que entra con su cuenta. Antes esta página concluía de este 401 que **no había** copia en Drive, y eso estaba mal. Lo que sigue sin verificarse es que la copia esté **completa**: una subida parcial de 360 GB se ve igual que una completa desde afuera, así que el chequeo es comparar contra `INVENTARIO.md` (17801 archivos, 360,50 GB; video 346 archivos, 357,91 GB).
 
 ### 7. El material son tres junctions que apuntan a la MISMA carpeta
 `data/raw/videos`, `data/raw/pdfs` y `data/raw/docs` son junctions de NTFS y las tres apuntan

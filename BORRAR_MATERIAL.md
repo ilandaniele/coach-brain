@@ -153,8 +153,20 @@ las cuatro estén hechas y verificadas, no conviene borrar.
 
 ## Qué se pierde para siempre si borrás el material crudo
 
-Esto es irreversible y no hay copia accesible en Drive: la descarga de Drive
-falla (ver el gotcha 6 de [STATUS.md](STATUS.md)). Lo que se pierde:
+**Corregido el 19/11: hay copia en Drive.** Ilan confirmó que subió el material a
+un Drive suyo. Esta sección decía antes que no había copia accesible, y lo deducía
+del HTTP 401 de `gdown` (gotcha 6 de [STATUS.md](STATUS.md)); ese 401 es de permisos
+sobre una carpeta "Restricted" y solo falsea la descarga programática, no la copia.
+Con esa copia el borrado deja de ser irreversible, y las dos pérdidas de abajo
+dejan de aplicar.
+
+Queda una cosa sin verificar, y es la que falla en una subida de este tamaño: que
+la copia esté **completa**. Una subida parcial de 360 GB se ve igual que una
+completa desde afuera. El chequeo es comparar contra `INVENTARIO.md`: **17801
+archivos, 360,50 GB**, de los cuales **video 346 archivos, 357,91 GB**.
+
+Si la copia de Drive no estuviera completa, esto es lo que se pierde y no lo
+devuelve ningún paso:
 
 - **La posibilidad de re-transcribir con un modelo mejor.** Los transcripts
   actuales los hizo faster-whisper large-v3. Si en dos años hay un modelo
