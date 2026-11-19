@@ -95,9 +95,26 @@ Windows es `381b4222-f694-41f0-9685-ff5bb260df2e` (**Equilibrado**, no Alto
 rendimiento). Batchear no arregla un clock bajo; subir el clock es lo único que
 queda, y es una opción del sistema que tiene que cambiar Ilan.
 
-**ETA honesto, medido del log de producción y no de un bench:** la corrida anterior
-hizo **19 archivos = 1335 chunks en 16,53 h = 44,6 s/chunk**. Faltan **291 archivos =
-3903 chunks**, o sea **48,3 h**. Esto corrige para arriba los “40 h” que dije antes.
+**ETA honesto, medido del log de producción y no de un bench.** Al 18/11 21:44
+faltan **286 archivos = 3735 chunks**, contados archivo por archivo con `_chunk_text`
+sobre los transcripts que todavía no tienen su `.extracted.json`, no estimados. Al
+ritmo de 31,5 s/chunk que se mide después de matar los dos procesos colgados, son
+**~33 h**, o sea la mañana del **20/11**.
+
+Ese ritmo es la corrección de dos cifras anteriores de esta página. Se midió 44,6
+s/chunk en la corrida vieja y 54,0 s/chunk en las primeras 2,8 h de esta, y de ahí
+salía un ETA de 48,3 h. Las dos mediciones estaban contaminadas por los dos procesos
+que habían quedado colgados en la GPU. Contando requests de `/api/chat` por hora en
+el log de Ollama: 40 s/chunk a las 16 h y 92 a las 17 h con los procesos vivos; 32,4
+a las 19 h, 27,7 a las 20 h y 32,2 a las 21 h con los procesos muertos. O sea
+**~1,6x de throughput**, gratis.
+
+Lo contraintuitivo, y la razón por la que esto casi se pasa por alto: los tok/s de
+decode **no** cambiaron. Una generación de 1673 tokens cronometrada token por token
+dio 22,3 tok/s después de matarlos contra 23,4 antes, que es la misma cifra dentro
+del ruido. Cuando le toca el turno la placa decodifica igual de rápido; lo que se
+ganó son más turnos. Medir tok/s para juzgar un cambio de throughput fue el error:
+hay que contar chunks por hora.
 El cuello son los tokens de salida: ~850 por chunk, 3,3 M en total. El prompt de un
 chunk pesa 2107-2155 tokens medidos (no 1525, como decía antes esta página).
 
