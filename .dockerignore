@@ -21,3 +21,6 @@ README.md
 STATUS.md
 scripts/
 uv.lock
+
+# los backups del indice: 399 MB cada uno, y la imagen solo copia qdrant_storage/
+qdrant_storage.*/
