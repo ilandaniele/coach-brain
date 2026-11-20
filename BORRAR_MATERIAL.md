@@ -8,7 +8,7 @@ El conocimiento ya destilado ocupa unos 670 MB y vive en el repo:
 | Texto completo de cada fuente | `data/processed/transcripts/` | 197 MB |
 | Principios, situaciones y frases | `data/processed/extracted/` | 40 MB |
 | OCR de las capturas de WhatsApp | `data/processed/whatsapp_images_ocr/` | 34 MB |
-| Índice vectorial que usa la app | `qdrant_storage/` | 399 MB |
+| Índice vectorial que usa la app | `qdrant_storage/` | 595 MB |
 
 La app en producción solo necesita `qdrant_storage/`, que ya va horneado dentro
 de la imagen de Docker. Los transcripts y las extracciones son el insumo para
@@ -22,17 +22,32 @@ regenera cuando quieras con:
 .venv\Scripts\python.exe scripts/manifest.py
 ```
 
-## ¿Se puede borrar hoy? (estado al 18/11, 13:10)
+## ¿Se puede borrar hoy? (estado al 20/11, 01:10)
 
-**El hueco se cerró.** `untrunc` recuperó la clase truncada y ya está
-transcripta: 1592 segmentos, 39.500 caracteres, 50min 17s de audio, castellano
-con probabilidad 1,0. El corpus pasó de 8838 a **8839 transcripts**, y ya no
-queda ninguna fuente con contenido sin cubrir.
+**Sí, por lo que el pipeline puede decir.** Las cuatro condiciones de abajo se
+cumplen: no queda ningún hueco, los 8839 transcripts tienen extracción, el
+índice está reconstruido y verificado en 59.101 vectores, y el inventario
+regenerado lo confirma. Lo único pendiente es publicar el índice nuevo en la
+app de Fly con `flyctl deploy`, y eso no necesita el material crudo: el índice
+ya está construido en disco.
 
-De las 17.801 fuentes, las 4 que siguen en `NO` no son contenido perdido:
+**Pero borrar no es la única opción, y no es la que recomiendo.** El material
+está subido a un Drive que es de otra persona. Ese acceso te lo pueden quitar o
+el dueño puede borrar la carpeta, sin avisar, y entonces los 360 GB no existen
+en ningún lado. Mover el material a un disco externo cuesta lo que cuesta un
+disco y deja la copia en tus manos. Si lo borrás, lo que queda es el texto
+destilado: 670 MB que son todo lo que la app necesita, pero no te devuelven un
+video si algún día querés volver a verlo o re-transcribirlo mejor.
+
+El hueco se cerró el 18/11: `untrunc` recuperó la clase truncada y ya está
+transcripta — 1592 segmentos, 39.500 caracteres, 50min 17s, castellano con
+probabilidad 1,0. El corpus pasó de 8838 a **8839 transcripts**.
+
+De las 17.802 fuentes, las 5 que siguen en `NO` no son contenido perdido:
 
 | Fuente | Por qué no se cubre |
 |---|---|
+| `4 Hablarle a una chica del trabajo, sexualiza.mp4` | contenedor ilegible (sin átomo `moov`), pero su contenido está transcripto desde la copia `... REPARADO.mp4` |
 | `00031653-VIDEO-2025-09-08-11-54-41.mp4` | sin pista de audio: no hay habla que transcribir |
 | `00033588-GIF-2025-10-03-00-26-43.mp4` | ídem |
 | `00021049-CV_divertido_Ilan_Daniele.pdf` | excluido a propósito: es tu CV, no material del coach |
