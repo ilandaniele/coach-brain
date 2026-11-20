@@ -1332,6 +1332,24 @@ instala `requirements-ci.txt` más el paquete en modo editable sin dependencias,
 `ruff check` por `src`, `tests` y `scripts`, corre la suite completa con `PYTHONUTF8=1` y
 termina compilando los scripts con `compileall`.
 
+**Para correr el lint localmente, ruff NO está en el venv del proyecto.** Está
+declarado en `pyproject.toml` entre las dependencias de desarrollo, pero nunca se
+instaló ahí, así que `.venv\Scripts\python.exe -m ruff` responde
+`No module named ruff` y es fácil leerlo como "no hay ruff en esta máquina". Sí
+hay, suelto, en
+`C:\Users\Ilan\AppData\Local\Python\pythoncore-3.14-64\Scripts\ruff.exe`
+(0.15.20). Corrélo desde la raíz del repo para que levante la configuración de
+`pyproject.toml`, y con los mismos tres directorios que usa el CI:
+
+```
+C:\Users\Ilan\AppData\Local\Python\pythoncore-3.14-64\Scripts\ruff.exe check src tests scripts
+```
+
+Ojo con `ruff format --check`: pide reformatear 53 de los 67 archivos. **El CI no
+corre el formateador**, solo `check`, así que eso no es una regresión ni un
+pendiente — es que el repo nunca se formateó con ruff. Reformatearlo es un commit
+aparte y una decisión de Ilan, no algo que arrastre un cambio cualquiera.
+
 `requirements-ci.txt` no es `pyproject.toml` recortado a ojo: se calculó con un barrido
 AST de los imports a nivel de módulo. Lo que el pipeline carga tarde queda afuera cuando
 los tests lo falsean —`faster-whisper` nunca se importa porque ningún test transcribe, y

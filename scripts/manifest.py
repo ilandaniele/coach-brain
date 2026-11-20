@@ -366,8 +366,8 @@ def clasificar_sin_cubrir(rows) -> int:
                 hermano = _recuperado_como(stem, cubiertos)
                 if hermano:
                     r["motivo"] = (
-                        "contenedor ilegible, recuperado como «{}»: "
-                        "el contenido ya esta transcripto".format(hermano)
+                        f"contenedor ilegible, recuperado como «{hermano}»: "
+                        "el contenido ya esta transcripto"
                     )
                     continue
                 r["motivo"] = "HUECO: contenedor ilegible, ffprobe no lo puede abrir"
