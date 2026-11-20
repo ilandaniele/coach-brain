@@ -1159,6 +1159,49 @@ j = httpx.post(f"{host}/api/chat", json=payload, timeout=900).json()
 print(j["prompt_eval_count"], j["eval_count"])  # suma < num_ctx, con margen
 ```
 
+### 35. 186 grabaciones de campo que el extractor vacía a propósito
+
+La extracción terminó el 19/11 con `ok=291 skip=8548 errores=0` y los 8839
+transcripts tienen su `.extracted.json`. Pero **3144 de esas extracciones tienen
+0 items**, y de ésas **186 vienen de transcripts de 1500+ chars**: 614.165
+caracteres, hasta 17.354 en un solo archivo. Como `kb/index.py` indexa desde
+`extracted/` y no desde `transcripts/`, esos 0,61 M de texto aportan **cero
+vectores** y la app no los ve.
+
+No es un bug ni un fallo del modelo. Es reproducible y es correcto según el
+prompt. Se verificó re-pidiendo el chunk 0 de
+`wa_audio_00037305-AUDIO-2025-12-04-20-24-44` (5 chunks, `chunks_fallidos`
+vacío), y Ollama devuelve exactamente:
+
+```json
+{ "principios": [], "situaciones": [], "frases": [] }
+```
+
+La razón está en `prompts/extractor.md`, que está escrito para material
+**didáctico**: "un fragmento de transcripción de una clase, audio o PDF del
+coach", con `frases` definido como "cita exacta **atribuible al coach**" y la
+regla de no extraer "opinión personal del coach sobre un caso suyo sin
+generalizar". Estos 186 archivos no son clases: son grabaciones de interacciones
+reales en la calle. El texto es el diálogo crudo, sin nadie explicando nada:
+
+> Chica, ¿cómo va? ¿Todo bien? [...] Porque tienen cara de pieles y ustedes
+> seguro saben donde venden.
+
+Frente a eso el prompt manda devolver vacío, y el modelo obedece. El hueco no
+está en la ejecución, está en el diseño: el corpus tiene dos clases de material
+y un solo extractor, hecho para una de las dos.
+
+Cerrarlo es una decisión de alcance, no un arreglo: haría falta un segundo
+prompt para interacciones (qué se dijo, qué funcionó, cómo reaccionó ella) y una
+corrida nueva sobre esos 186 archivos. Queda sin decidir, y queda anotado acá
+para que no se confunda con un defecto de la corrida.
+
+Lo que sí deja una regla: **una extracción con 0 items no es evidencia de que no
+había nada que extraer**. Puede ser que el prompt no sepa leer ese tipo de
+fuente. El contador que lo delata es el de `scripts/verificar.py`, "Extraccion
+con 0 items ... de esas, con transcript de 1500+ chars": si ese número no es
+cero, hay texto largo que no está llegando al índice.
+
 ## Costos reales
 
 | Etapa | Costo |

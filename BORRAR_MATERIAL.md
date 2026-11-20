@@ -43,8 +43,8 @@ Lo que falta no necesita el material crudo:
 | Condición | Estado |
 |---|---|
 | Que no quede ningún `HUECO` | **Hecho**, 18/11 13:06 |
-| Que la re-destilación con Ollama termine | **En curso**: 8546 de 8823. Termina alrededor del 20/11 a la noche |
-| Que el índice se reconstruya y la app lo sirva | **Falta**: `kb.index --reset` + `flyctl deploy` cuando la extracción cierre |
+| Que la re-destilación con Ollama termine | **Hecha**, 19/11 21:42: `ok=291 skip=8548 errores=0`, los 8839 transcripts tienen extracción. Tardó 1 día 6:13:51 |
+| Que el índice se reconstruya y la app lo sirva | **Falta**: `kb.index --reset` + `flyctl deploy`. Es destructivo y espera el OK de Ilan |
 | Que el inventario se regenere y confirme lo anterior | **Falta**: `scripts/manifest.py`, después del índice |
 
 La extracción corre sobre `transcripts/`, el índice sobre `extracted/`, y el
@@ -52,18 +52,19 @@ inventario solo lee tamaños y duraciones. Ninguno abre un video.
 
 ### Lo único que hay que hacer antes de borrar
 
-El archivo recuperado, `roto.mp4_fixed.mp4` (969.451.760 bytes), está en el
-scratchpad de la sesión de Claude:
+**Hecho el 19/11.** El archivo recuperado vivía solo en el scratchpad de la
+sesión de Claude, que se limpia solo, así que se copió al lado del original:
 
 ```
-C:\Users\Ilan\AppData\Local\Temp\claude\761b3e6a4181af87\cf70a6bc-7876-4422-a8de-f326e9711069\scratchpad\untrunc\roto.mp4_fixed.mp4
+C:\Users\Ilan\Desktop\Ilan\Seduccion\Bonus\4 Hablarle a una chica del trabajo, sexualiza REPARADO.mp4
 ```
 
-Ese directorio se limpia solo. Mientras el original roto siga existiendo no
-importa, porque `untrunc` se puede volver a correr. Pero si se borra el material
-crudo con el recuperado todavía en el scratchpad, la clase deja de poder verse
-para siempre: no queda ni el archivo arreglado ni el roto del que salió. **Copiar
-`roto.mp4_fixed.mp4` a un lugar durable es el paso previo a cualquier borrado.**
+969.451.760 bytes, verificado con `cmp` contra el origen: idéntico byte a byte.
+El original roto (`4 Hablarle a una chica del trabajo, sexualiza.mp4`) sigue
+donde estaba, y los dos son parte de los 360 GB. Si se borra el material crudo
+se van los dos juntos, y entonces la clase no se puede volver a ver: no queda ni
+el arreglado ni el roto del que salió. El transcript sí queda (1592 segmentos,
+39.500 caracteres), que es lo que usa la app.
 
 ### Y las dos pérdidas que ningún paso puede devolver
 
