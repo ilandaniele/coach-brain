@@ -144,3 +144,45 @@ def test_stems_fuera_del_corpus_saca_el_prefijo_de_tipo(monkeypatch, tmp_path):
 def test_stems_fuera_del_corpus_sin_carpeta(monkeypatch, tmp_path):
     monkeypatch.setattr(manifest, "FUERA", tmp_path / "no-existe")
     assert manifest._stems_fuera_del_corpus() == set()
+
+
+def test_el_original_roto_no_es_hueco_si_hay_una_copia_recuperada(monkeypatch):
+    """El caso de `untrunc`: el original ilegible queda sin cubrir, pero su
+    contenido esta transcripto bajo el nombre de la copia reparada. Marcarlo
+    HUECO seria un falso "se pierde" sobre el registro que decide el borrado."""
+    monkeypatch.setattr(manifest, "_stems_fuera_del_corpus", lambda: set())
+    monkeypatch.setattr(manifest.subprocess, "run", _ffprobe(returncode=1))
+    rows = [
+        _row("data/raw/docs/Bonus/4 Hablarle, sexualiza.mp4"),
+        _row("data/raw/docs/Bonus/4 Hablarle, sexualiza REPARADO.mp4", cubierto="SI"),
+    ]
+    assert manifest.clasificar_sin_cubrir(rows) == 0
+    assert "recuperado como" in rows[0]["motivo"]
+    assert "reparado" in rows[0]["motivo"]
+    assert "HUECO" not in rows[0]["motivo"]
+
+
+def test_un_hermano_sin_cubrir_no_salva_al_original_roto(monkeypatch):
+    """La copia tiene que estar CUBIERTA. Dos archivos rotos con nombres
+    parecidos siguen siendo una perdida, y el inventario tiene que decirlo."""
+    monkeypatch.setattr(manifest, "_stems_fuera_del_corpus", lambda: set())
+    monkeypatch.setattr(manifest.subprocess, "run", _ffprobe(returncode=1))
+    rows = [
+        _row("data/raw/docs/clase.mp4"),
+        _row("data/raw/docs/clase REPARADO.mp4"),
+    ]
+    assert manifest.clasificar_sin_cubrir(rows) == 2
+    assert all("HUECO" in r["motivo"] for r in rows)
+
+
+def test_un_hermano_cubierto_que_no_es_prefijo_no_salva_a_nadie(monkeypatch):
+    """La regla es "mismo nombre mas un sufijo", no "esta en la misma carpeta".
+    Si no, cualquier video cubierto taparia el hueco del de al lado."""
+    monkeypatch.setattr(manifest, "_stems_fuera_del_corpus", lambda: set())
+    monkeypatch.setattr(manifest.subprocess, "run", _ffprobe(returncode=1))
+    rows = [
+        _row("data/raw/docs/clase 7.mp4"),
+        _row("data/raw/docs/clase 8.mp4", cubierto="SI"),
+    ]
+    assert manifest.clasificar_sin_cubrir(rows) == 1
+    assert "HUECO" in rows[0]["motivo"]

@@ -3,14 +3,14 @@
 Generado por `scripts/manifest.py`. El detalle fila por fila esta en
 `data/processed/manifest_fuentes.csv`, una fila por archivo.
 
-**Total en disco:** 17801 archivos, 360.50 GB
+**Total en disco:** 17802 archivos, 361.41 GB
 
 | Tipo | Archivos | Tamano | Cubiertos | Tamano cubierto |
 |---|---|---|---|---|
 | audio | 8396 | 1.32 GB | 8396 | 1.32 GB |
 | doc | 95 | 0.30 GB | 93 | 0.30 GB |
 | imagen | 8964 | 0.98 GB | 8964 | 0.98 GB |
-| video | 346 | 357.91 GB | 343 | 356.99 GB |
+| video | 347 | 358.81 GB | 344 | 357.90 GB |
 
 ## Archivos SIN cubrir
 
@@ -20,9 +20,9 @@ audio no tiene habla que perder, y un transcript excluido a proposito
 tampoco es una perdida. Solo los marcados `HUECO` son contenido que se
 pierde sin forma de recuperarlo.
 
-**5 archivos, 0.91 GB — de los cuales 1 es hueco real**
+**5 archivos, 0.91 GB — de los cuales 0 son huecos reales**
 
-- `C:\Users\Ilan\Desktop\Proyectos\coach-brain\data\raw\docs\Bonus\4 Hablarle a una chica del trabajo, sexualiza.mp4` (0.91 GB, video) — HUECO: contenedor ilegible, ffprobe no lo puede abrir
+- `C:\Users\Ilan\Desktop\Proyectos\coach-brain\data\raw\docs\Bonus\4 Hablarle a una chica del trabajo, sexualiza.mp4` (0.91 GB, video) — contenedor ilegible, recuperado como «4 hablarle a una chica del trabajo, sexualiza reparado»: el contenido ya esta transcripto
 - `C:\Users\Ilan\Desktop\Proyectos\coach-brain\data\raw\whatsapp\00031653-VIDEO-2025-09-08-11-54-41.mp4` (0.00 GB, video) — sin pista de audio: no hay habla que transcribir
 - `C:\Users\Ilan\Desktop\Proyectos\coach-brain\data\raw\whatsapp\00033588-GIF-2025-10-03-00-26-43.mp4` (0.00 GB, video) — sin pista de audio: no hay habla que transcribir
 - `C:\Users\Ilan\Desktop\Proyectos\coach-brain\data\raw\whatsapp\00021049-CV_divertido_Ilan_Daniele.pdf` (0.00 GB, doc) — excluido a proposito (transcript en _fuera_del_corpus/)
@@ -30,12 +30,11 @@ pierde sin forma de recuperarlo.
 
 ## Con transcript pero sin extraccion
 
-301 archivos. El texto ya esta guardado en `data/processed/transcripts/`;
-falta destilarlo. Para eso no hace falta el archivo original.
+Ninguno.
 
 ## Con extraccion vacia (0 items)
 
-2896 archivos devolvieron 0 principios, 0 situaciones y 0 frases.
+3144 archivos devolvieron 0 principios, 0 situaciones y 0 frases.
 En audios cortos eso suele ser legitimo. Re-extraer no necesita el
 archivo original, solo el transcript.
 

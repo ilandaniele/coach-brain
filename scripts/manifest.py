@@ -318,6 +318,25 @@ def _stems_fuera_del_corpus() -> set[str]:
     return out
 
 
+def _recuperado_como(stem: str, cubiertos: set[str]) -> str | None:
+    """Nombre del hermano cubierto que recupera a `stem`, si existe.
+
+    Un contenedor roto que se recupero con `untrunc` deja DOS archivos en la
+    misma carpeta: el original ilegible y la copia reparada, que lleva el mismo
+    nombre mas un sufijo. El transcript sale de la copia, asi que el original
+    queda sin cubrir — pero su contenido no se perdio, esta transcripto bajo el
+    otro nombre. Marcarlo `HUECO` es un falso "se pierde", y el inventario se
+    lee justamente para decidir que se puede borrar.
+
+    Pasa con `4 Hablarle a una chica del trabajo, sexualiza.mp4` (sin atomo
+    `moov`) y su `... sexualiza REPARADO.mp4`.
+    """
+    for otro in cubiertos:
+        if otro != stem and otro.startswith(stem):
+            return otro
+    return None
+
+
 def clasificar_sin_cubrir(rows) -> int:
     """Anota en cada fila sin cubrir POR QUE lo esta. Devuelve los huecos reales.
 
@@ -328,6 +347,7 @@ def clasificar_sin_cubrir(rows) -> int:
     que SI hay que recuperar hace que el registro no sirva para decidir.
     """
     fuera = _stems_fuera_del_corpus()
+    cubiertos = {Path(r["path"]).stem.lower() for r in rows if r["cubierto"] != "NO"}
     huecos = 0
     for r in rows:
         if r["cubierto"] != "NO":
@@ -343,6 +363,13 @@ def clasificar_sin_cubrir(rows) -> int:
                 r["motivo"] = "sin pista de audio: no hay habla que transcribir"
                 continue
             if audio == "ilegible":
+                hermano = _recuperado_como(stem, cubiertos)
+                if hermano:
+                    r["motivo"] = (
+                        "contenedor ilegible, recuperado como «{}»: "
+                        "el contenido ya esta transcripto".format(hermano)
+                    )
+                    continue
                 r["motivo"] = "HUECO: contenedor ilegible, ffprobe no lo puede abrir"
                 huecos += 1
                 continue

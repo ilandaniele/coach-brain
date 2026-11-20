@@ -44,11 +44,31 @@ Lo que falta no necesita el material crudo:
 |---|---|
 | Que no quede ningún `HUECO` | **Hecho**, 18/11 13:06 |
 | Que la re-destilación con Ollama termine | **Hecha**, 19/11 21:42: `ok=291 skip=8548 errores=0`, los 8839 transcripts tienen extracción. Tardó 1 día 6:13:51 |
-| Que el índice se reconstruya y la app lo sirva | **Falta**: `kb.index --reset` + `flyctl deploy`. Es destructivo y espera el OK de Ilan |
-| Que el inventario se regenere y confirme lo anterior | **Falta**: `scripts/manifest.py`, después del índice |
+| Que el índice se reconstruya y la app lo sirva | **Hecho local**, 20/11 00:46: 59.101 vectores (15.457 + 18.553 + 25.091), verificados reabriendo el cliente y contando, no leyendo el log. Una búsqueda de prueba devuelve principios, situaciones y frases. **Falta el `flyctl deploy`**, que publica el índice nuevo en la app de Fly y espera el OK de Ilan |
+| Que el inventario se regenere y confirme lo anterior | **Hecho**, 20/11 01:05: 17.802 archivos en disco, 5 sin cubrir, **0 huecos reales** |
 
 La extracción corre sobre `transcripts/`, el índice sobre `extracted/`, y el
 inventario solo lee tamaños y duraciones. Ninguno abre un video.
+
+El primer `--reset`, el del 20/11 a las 00:11, **no sirvió**: dejó el índice
+duplicado, con 98.742 vectores en vez de 59.101, porque en Windows el borrado
+de las colecciones falla en silencio (gotcha 36 de STATUS.md). El log informaba
+los conteos correctos igual. Está anotado acá porque la condición de arriba se
+cumple con el **segundo** reset, el de las 00:46, y porque el conteo que se
+puede creer es el que sale de reabrir el cliente, no el que imprime el proceso
+que escribió.
+
+El inventario tampoco pasó en el primer intento: marcaba `HUECO` sobre
+`4 Hablarle a una chica del trabajo, sexualiza.mp4`, el contenedor sin átomo
+`moov`. No era una pérdida — su contenido está transcripto (50,3 min, 39.500
+caracteres) desde la copia que recuperó `untrunc` — pero el transcript declaraba
+como fuente el archivo ilegible en vez de la copia reparada, así que el
+inventario veía la copia como material sin procesar. Se corrigió el
+`source_path` del transcript y se le enseñó a `clasificar_sin_cubrir()` a
+distinguir "roto" de "roto pero recuperado": un original ilegible cuyo nombre
+es prefijo de un hermano cubierto ya no cuenta como hueco. El original de
+977.018.880 bytes queda en la lista de sin cubrir con ese motivo, y **borrarlo
+no pierde nada que no esté en la copia reparada**.
 
 ### Lo único que hay que hacer antes de borrar
 
