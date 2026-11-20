@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import threading
 import uuid
 from functools import lru_cache
@@ -197,12 +198,47 @@ def index_extracted(client: QdrantClient, extracted_path: Path, source_meta: dic
     return counts
 
 
+def _borrar_colecciones_del_disco() -> None:
+    """Borra del disco las colecciones del Qdrant embebido, y verifica.
+
+    `QdrantLocal.delete_collection` saca la colección de memoria y después hace
+    `shutil.rmtree(collection_path, ignore_errors=True)`. En Windows el
+    `storage.sqlite` de la colección sigue abierto por el cliente que la tenía
+    cargada, así que el rmtree falla, `ignore_errors=True` se come el error, y
+    el `create_collection` que viene después vuelve a abrir el MISMO sqlite con
+    los puntos viejos adentro. El resultado es que `--reset` no resetea nada:
+    los vectores nuevos quedan sumados encima de los viejos y el índice queda
+    duplicado, con el log informando los conteos nuevos como si estuviera bien
+    (gotcha #36).
+
+    Por eso borramos los directorios acá, antes de construir el cliente, cuando
+    nadie los tiene abiertos, y sin `ignore_errors`: si no se puede borrar hay
+    que enterarse. `meta.json` queda como está a propósito; el cliente levanta
+    la colección de nuevo, vacía, y `persistence.py` recrea el directorio.
+    """
+    base = settings.qdrant_storage / "collection"
+    for name in [COL_PRINCIPLES, COL_SITUATIONS, COL_STYLE]:
+        destino = base / name
+        if not destino.exists():
+            continue
+        shutil.rmtree(destino)
+        if destino.exists():
+            raise RuntimeError(
+                f"No se pudo borrar {destino}. Cerrá Streamlit y cualquier otro "
+                "proceso que tenga abierto el índice, y volvé a correr."
+            )
+        console.print(f"[yellow]Borrada del disco la colección {name}[/yellow]")
+
+
 def run(reset: bool = False) -> None:
     extracted_dir = settings.extracted_path
     extracts = sorted(extracted_dir.glob("*.extracted.json"))
     if not extracts:
         console.print(f"[yellow]No hay extractos en {extracted_dir}. Corré `coach extract` primero.[/yellow]")
         return
+
+    if reset and not settings.qdrant_url:
+        _borrar_colecciones_del_disco()
 
     client = get_qdrant()
     dim = embed_dim()

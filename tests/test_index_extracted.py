@@ -223,3 +223,79 @@ def test_sin_extractos_no_toca_qdrant(entorno, monkeypatch):
 
     monkeypatch.setattr(I, "get_qdrant", explota)
     I.run(reset=True)
+
+
+# --- 4) el --reset que no reseteaba (gotcha #36) ----------------------------
+
+
+def _col(tmp_path, nombre):
+    d = tmp_path / "qdrant_storage" / "collection" / nombre
+    d.mkdir(parents=True)
+    (d / "storage.sqlite").write_text("viejo", encoding="utf-8")
+    return d
+
+
+def test_el_reset_borra_los_directorios_del_disco_antes_de_abrir_el_cliente(
+    entorno, tmp_path, monkeypatch
+):
+    """Gotcha #36. `QdrantLocal.delete_collection` borra con
+    `shutil.rmtree(..., ignore_errors=True)`, y en Windows el sqlite de la
+    colección sigue abierto: el borrado falla en silencio y el re-indexado
+    queda SUMADO encima del índice viejo. El reset tiene que borrar el
+    directorio antes de construir el cliente, que es cuando nadie lo tiene
+    abierto.
+
+    Se fija también el orden: si el cliente se abriera primero, el directorio
+    ya estaría tomado y volveríamos al bug.
+    """
+    monkeypatch.setattr(settings, "qdrant_url", "")
+    monkeypatch.setattr(settings, "qdrant_path", str(tmp_path / "qdrant_storage"))
+    dirs = [_col(tmp_path, n) for n in (I.COL_PRINCIPLES, I.COL_SITUATIONS, I.COL_STYLE)]
+    _extracto(entorno, "uno", principios=[{"id": "p1", "texto": "algo"}])
+
+    c = FakeQdrant(existentes=[I.COL_PRINCIPLES, I.COL_SITUATIONS, I.COL_STYLE])
+    vivos_al_abrir = []
+
+    def abrir():
+        vivos_al_abrir.extend(d for d in dirs if d.exists())
+        return c
+
+    monkeypatch.setattr(I, "get_qdrant", abrir)
+    I.run(reset=True)
+
+    assert [d for d in dirs if d.exists()] == [], "quedo un directorio con datos viejos"
+    assert vivos_al_abrir == [], "borro DESPUES de abrir el cliente, que es el bug"
+
+
+def test_el_reset_no_toca_el_disco_si_qdrant_es_remoto(entorno, tmp_path, monkeypatch):
+    """Con `QDRANT_URL` puesto el índice no está en este disco, y
+    `delete_collection` contra el servidor sí funciona. Borrar acá sería borrar
+    un directorio ajeno al índice que se está reseteando."""
+    monkeypatch.setattr(settings, "qdrant_url", "http://qdrant.example:6333")
+    monkeypatch.setattr(settings, "qdrant_path", str(tmp_path / "qdrant_storage"))
+    d = _col(tmp_path, I.COL_PRINCIPLES)
+    _extracto(entorno, "uno", principios=[{"id": "p1", "texto": "algo"}])
+
+    monkeypatch.setattr(I, "get_qdrant", lambda: FakeQdrant())
+    I.run(reset=True)
+    assert d.exists()
+
+
+def test_el_reset_no_aborta_si_el_directorio_no_existe(tmp_path, monkeypatch):
+    """Primer índice de una máquina nueva: no hay nada que borrar."""
+    monkeypatch.setattr(settings, "qdrant_url", "")
+    monkeypatch.setattr(settings, "qdrant_path", str(tmp_path / "no_existe"))
+    I._borrar_colecciones_del_disco()
+
+
+def test_si_el_directorio_sobrevive_al_borrado_la_corrida_falla(tmp_path, monkeypatch):
+    """La razón de ser del fix: un borrado que falla no puede pasar callado.
+    Antes `ignore_errors=True` lo tapaba y el índice quedaba duplicado con el
+    log informando los conteos nuevos como si todo hubiera salido bien."""
+    monkeypatch.setattr(settings, "qdrant_url", "")
+    monkeypatch.setattr(settings, "qdrant_path", str(tmp_path / "qdrant_storage"))
+    _col(tmp_path, I.COL_PRINCIPLES)
+    monkeypatch.setattr(I.shutil, "rmtree", lambda d: None)
+
+    with pytest.raises(RuntimeError, match="No se pudo borrar"):
+        I._borrar_colecciones_del_disco()

@@ -30,6 +30,8 @@ data/curated/**
 # Qdrant local storage
 qdrant_storage/
 qdrant_storage.bak/
+# cualquier backup del indice: pesan 399 MB cada uno
+qdrant_storage.*/
 *.qdrant
 
 # Models cache (HuggingFace, Whisper)

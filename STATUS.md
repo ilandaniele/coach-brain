@@ -718,7 +718,7 @@ En Windows con `torch 2.12.0+cu130`, importar `qdrant_client(.models)` **antes**
 El modo local (`QDRANT_PATH`) bloquea la carpeta para UN solo proceso. No se puede indexar mientras Streamlit está levantado. Para re-indexar: parar Streamlit → `index --reset` → relanzar Streamlit. La extracción (solo escribe JSON) no toca Qdrant, corre en paralelo sin problema.
 
 ### 12. Re-indexar SIEMPRE con --reset
-`index.py` usa UUIDs random como point IDs, así que correr `index` sin `--reset` DUPLICA todo. Siempre `python -m coach_brain.kb.index --reset`.
+`index.py` usa UUIDs random como point IDs, así que correr `index` sin `--reset` DUPLICA todo. Siempre `python -m coach_brain.kb.index --reset`. Y ojo: hasta el 20/11 el `--reset` **tampoco alcanzaba** en Windows, ver el gotcha 36.
 
 ### 13. Las etapas saltean por existencia de archivo, no por contenido
 Si una etapa escribió un archivo vacío por un error (lo que pasó con los 32 PDFs), re-correrla no lo reintenta. Para forzar: borrar el output vacío primero.
@@ -1201,6 +1201,64 @@ había nada que extraer**. Puede ser que el prompt no sepa leer ese tipo de
 fuente. El contador que lo delata es el de `scripts/verificar.py`, "Extraccion
 con 0 items ... de esas, con transcript de 1500+ chars": si ese número no es
 cero, hay texto largo que no está llegando al índice.
+
+### 36. El `--reset` no reseteaba, y el log informaba conteos correctos igual
+
+La reconstrucción del 20/11 corrió con `--reset`, el log imprimió `Borrada
+colección` para las tres y cerró con `Indexado completo — principles=15457
+situations=18553 style=25091`, que es exactamente lo que hay en disco. Pero las
+colecciones quedéron con **98.742 puntos**: 24.091 + 31.198 + 43.453. El exceso,
+39.641, es el total exacto del índice anterior. El `--reset` no borró nada y los
+vectores nuevos quedaron sumados encima de los viejos: el índice duplicado del
+gotcha 12, pero pasando por el camino que supuestamente lo evita.
+
+La causa está en `qdrant_client/local/qdrant_local.py`:
+
+```python
+def delete_collection(self, collection_name: str, **kwargs: Any) -> bool:
+    _collection = self.collections.pop(collection_name, None)
+    del _collection
+    ...
+    shutil.rmtree(collection_path, ignore_errors=True)
+```
+
+En Windows el `storage.sqlite` de la colección sigue abierto por el cliente que
+la tenía cargada, así que el `rmtree` falla — y **`ignore_errors=True` se come
+el error**. El directorio sobrevive, `create_collection` vuelve a abrir el mismo
+sqlite, y `LocalCollection` levanta los puntos viejos de adentro. Después el
+indexado hace upserts con uuid4 nuevos, que no colisionan con nada, y suma.
+
+La advertencia que lo delataba estaba en el log y pasa por decorativa:
+
+```
+UserWarning: Local mode is not recommended for collections with more than 20,000 points.
+Current collection contains 20022 points.
+```
+
+20.022 a mitad de corrida sobre una colección que al final tiene 25.091 solo
+cierra si arrancó con los 18.362 viejos adentro.
+
+El fix está en `kb/index.py`: `_borrar_colecciones_del_disco()` borra
+`qdrant_storage/collection/<nombre>` **antes** de construir el cliente, que es
+el único momento en que nadie tiene el sqlite abierto, y sin `ignore_errors`,
+con una verificación de que el directorio desapareció de verdad. Solo corre en
+modo embebido: con `QDRANT_URL` puesto el `delete_collection` contra el servidor
+funciona y el disco local no es el índice. Cinco tests en
+`tests/test_index_extracted.py` lo fijan, incluido el orden (si borrara después
+de abrir el cliente volveríamos al bug) y el borrado que falla, que ahora tira
+`RuntimeError` en vez de seguir callado.
+
+La regla que deja: **un conteo que sale del proceso que escribió no verifica
+nada**. `Indexado completo — principles=15457` es la suma de lo que el indexador
+creyó insertar, no lo que la colección tiene. Para verificar hay que volver a
+abrir el cliente y contar:
+
+```
+.venv\Scripts\python.exe -c "from coach_brain.kb.index import *; c=get_qdrant(); print([(n, c.count(collection_name=n, exact=True).count) for n in (COL_PRINCIPLES, COL_SITUATIONS, COL_STYLE)])"
+```
+
+Ese total tiene que coincidir con el que informa `scripts/verificar.py` desde
+`extracted/`. Si no coincide, el índice está mal aunque el log diga que no.
 
 ## Costos reales
 
