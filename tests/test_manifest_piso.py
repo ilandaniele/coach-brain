@@ -87,3 +87,20 @@ def test_el_mensaje_dice_donde_mirar():
     msg = str(e.value)
     assert "data/raw" in msg
     assert "--sin-piso" in msg
+
+
+def test_el_mensaje_avisa_que_sin_piso_destruye_el_unico_registro():
+    """Despues del borrado del 20/11/2026 el guard salta siempre, y la salida
+    obvia que alguien va a copiar es `--sin-piso`. Pero ya no hay material que
+    inventariar: correrlo escribe un inventario de cero archivos encima del
+    INVENTARIO.md commiteado, que es el unico registro de que habia. El mensaje
+    tiene que decir eso en la misma pantalla donde ofrece la bandera, porque el
+    que la lea no va a ir a buscar el docstring.
+    """
+    m = _cargar()
+    with pytest.raises(SystemExit) as e:
+        m.exigir_piso(0, 8839, argv=[])
+    msg = str(e.value)
+    assert "unico registro" in msg
+    assert "SOBREESCRIBE" in msg
+    assert "BORRAR_MATERIAL.md" in msg

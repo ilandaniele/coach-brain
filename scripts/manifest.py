@@ -400,11 +400,18 @@ def exigir_piso(n_disk: int, n_ts: int, argv=None) -> None:
 
     El piso sale de un invariante, no de una calibracion: cada transcript lo
     produjo un archivo fuente, asi que en disco no puede haber menos archivos
-    que transcripts. Hoy son 17801 contra 8838, asi que el margen es amplio y
-    solo salta cuando algo se rompio de verdad.
+    que transcripts.
 
-    `--sin-piso` lo desactiva, para el caso en que el material se haya borrado
-    a proposito y se quiera un inventario que lo refleje.
+    Desde el 20/11/2026 este guard salta SIEMPRE, porque el material se borro a
+    proposito y en disco quedan 0 archivos para 8839 transcripts. Eso es lo
+    correcto: el INVENTARIO.md commiteado es ahora el unico registro de que
+    habia, y el guard es lo que impide que una corrida distraida lo reemplace
+    por un inventario vacio.
+
+    `--sin-piso` lo desactiva. Despues del borrado eso ya no sirve para
+    "reflejar la realidad": escribe un inventario de cero archivos encima del
+    unico que queda. Usarlo solo si alguien repuebla `data/raw` con material
+    nuevo y quiere un inventario de eso.
     """
     if argv is None:
         argv = sys.argv
@@ -416,11 +423,13 @@ def exigir_piso(n_disk: int, n_ts: int, argv=None) -> None:
         "ABORTADO: %d archivos en disco para %d transcripts.\n"
         "Cada transcript salio de un archivo, asi que esto no puede pasar"
         " salvo que el material no se haya podido recorrer.\n"
-        "Revisa que %s tenga el material a la vista: las junctions de"
-        " data/raw apuntan a la carpeta donde esta.\n"
+        "Revisa que data/raw (%s) tenga el material a la vista. Si llegaste aca despues"
+        " del 20/11/2026, lo mas probable es que no haya nada que revisar: el"
+        " material se borro ese dia a proposito, ver BORRAR_MATERIAL.md.\n"
         "No se escribio nada, ni el CSV ni INVENTARIO.md: el inventario que"
-        " hay sigue siendo el de antes.\n"
-        "Si el material se borro a proposito, volve a correr con --sin-piso."
+        " hay sigue siendo el de antes, y es el unico registro de que habia.\n"
+        "Correr con --sin-piso lo SOBREESCRIBE con un inventario vacio. No lo"
+        " hagas salvo que quieras perder esa foto."
         % (n_disk, n_ts, RAW))
 
 

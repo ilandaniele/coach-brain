@@ -30,9 +30,9 @@ Overview y setup en `README.md`. Este archivo es el estado operativo y los gotch
 | Embeddings bge-m3 | OK (cacheado) | dim 1024, en `~/.cache/huggingface/` |
 | Ollama | OK | `C:\Users\Ilan\AppData\Local\Programs\Ollama\ollama.exe`, modelo `qwen2.5:14b-instruct` |
 | Qdrant | OK (local embebido) | persiste en `./qdrant_storage/` |
-| Material del coach | OK | **`C:\Users\Ilan\Desktop\Ilan\Seduccion`** (360GB) — las tres junctions de `data/raw` apuntan ahi y resuelven bien; ver gotcha #7 |
+| Material del coach | BORRADO | Borrado el 20/11/2026 con autorizacion expresa de Ilan: 361,41 GB entre `C:\Users\Ilan\Desktop\Ilan\Seduccion` (263 archivos, 358,33 GB) y `data/raw/whatsapp/` (17.543 archivos, 3,08 GB). Las tres junctions de `data/raw` ya no existen. Lo destilado (866 MB) sigue en el repo y en la imagen de Fly. Ver [BORRAR_MATERIAL.md](BORRAR_MATERIAL.md) y gotcha #7 |
 | Deploy Fly.io | OK | app `coach-brain-ilan`, región `iad`, 4GB / 2 vCPU shared, siempre prendida |
-| Tests | OK | **1064 pasando + 1 salteado** en 37 archivos: `.venv\Scripts\python.exe -m pytest tests/ -q`, ~20 s, sin GPU ni red. Cobertura **100 % con ramas** sobre `src/coach_brain`, con el piso puesto en `fail_under = 100` en `pyproject.toml`; CI no la mide (pytest-cov no está en `requirements-ci.txt`), la sostiene la corrida local `python -m coverage run -m pytest -q && python -m coverage report`. Además `scripts\smoke_test.py --quick` |
+| Tests | OK | **1072 pasando + 1 salteado** en 37 archivos: `.venv\Scripts\python.exe -m pytest tests/ -q`, ~20 s, sin GPU ni red. Cobertura **100 % con ramas** sobre `src/coach_brain`, con el piso puesto en `fail_under = 100` en `pyproject.toml`; CI no la mide (pytest-cov no está en `requirements-ci.txt`), la sostiene la corrida local `python -m coverage run -m pytest -q && python -m coverage report`. Además `scripts\smoke_test.py --quick` |
 | CI (GitHub Actions) | **Verde** | `.github/workflows/ci.yml`: ruff + la suite completa en un runner Linux sin GPU, con `requirements-ci.txt` + torch del índice CPU. Pusheado el 18/11 a las 12:50 y verde en su primera corrida (`gh run 44307793181`): `All checks passed!` y **1057 passed in 26.21s**, 56 s de punta a punta |
 
 ---
@@ -560,10 +560,27 @@ los dos declara una pista de audio**. El `tuple index out of range` que tiraba
 `ingest.transcribe` era eso, dicho mal. Nunca van a dar texto, y ahora la etapa
 los saltea con un mensaje que lo explica en vez de fallar.
 
-### Decisión sobre borrar los 360 GB
+### Los 360 GB ya se borraron (20/11/2026)
 
-Está documentada aparte, en [BORRAR_MATERIAL.md](BORRAR_MATERIAL.md) y
-[INVENTARIO.md](INVENTARIO.md). **No está autorizado borrar nada.**
+Ilan los borró el 20 de noviembre de 2026, después de que las cuatro condiciones
+de [BORRAR_MATERIAL.md](BORRAR_MATERIAL.md) se cumplieran y de publicar el índice
+nuevo en Fly (versión 19, imagen de 6,8 GB con los 59.101 vectores adentro). Fueron
+**361,41 GB**: 358,33 GB de `Seduccion` y 3,08 GB de `data/raw/whatsapp/`. `C:` quedó
+con 389,6 GB libres.
+
+Lo que sobrevive son los 866 MB destilados, que ya estaban commiteados y pusheados
+antes de borrar. Lo que se perdió para siempre es poder re-transcribir con un modelo
+mejor y poder volver a ver un video; de 17.806 archivos, 2 clips de WhatsApp no tenían
+pista de audio y de esos dos no queda nada.
+
+**`scripts/manifest.py` ya no sirve como reporte de cobertura**, porque recorre
+`data/raw/` y ahí no queda nada: si lo corrés hoy informa que todo falta. El
+[INVENTARIO.md](INVENTARIO.md) y el `data/processed/manifest_fuentes.csv` que están
+commiteados son la foto final y el único registro de qué había.
+
+Sigue **sin autorizar** borrar los 13 MB de `data/processed/whatsapp_images/` ni los
+dos backups del índice (`qdrant_storage.bak/` y `qdrant_storage.pre_reset_20261120/`,
+399 MB cada uno).
 
 ---
 
@@ -685,9 +702,13 @@ Console default de Windows rompe con caracteres Unicode (✓, ✗, emojis en có
 ### 6. Drive: gdown no acepta carpetas "Restricted"
 Devuelve HTTP 401 (`data/_drive_download.log`). Permiso necesario: "Anyone with the link". Lo que esta prueba falsea es la descarga **programática** con `gdown`, no la existencia de la copia. Esta página concluyó primero que **no había** copia en Drive, y después que había una en un Drive de Ilan; las dos cosas estaban mal. Lo que Ilan precisó el 19/11 es que el Drive es **de otra persona** y es la fuente de la que bajó los videos. Por eso la completitud no es el riesgo (el material salió de ahí) y el acceso sí: depende de un tercero, que puede revocarlo o borrar la carpeta sin aviso, y la recuperación sería a mano por la web porque `gdown` no entra en una carpeta "Restricted". Ver [BORRAR_MATERIAL.md](BORRAR_MATERIAL.md).
 
-### 7. El material son tres junctions que apuntan a la MISMA carpeta
-`data/raw/videos`, `data/raw/pdfs` y `data/raw/docs` son junctions de NTFS y las tres apuntan
-a **`C:\Users\Ilan\Desktop\Ilan\Seduccion`** (360GB), donde `Bonus` es una subcarpeta.
+### 7. El material eran tres junctions que apuntaban a la MISMA carpeta
+**Las tres junctions y su destino se borraron el 20/11/2026** (ver arriba). Esta entrada
+queda porque la lección vale para cualquier junction futura, y porque explica el trabajo
+duplicado y el trabajo faltante que aparecen en el historial de abajo.
+
+`data/raw/videos`, `data/raw/pdfs` y `data/raw/docs` eran junctions de NTFS y las tres apuntaban
+a **`C:\Users\Ilan\Desktop\Ilan\Seduccion`** (360GB), donde `Bonus` era una subcarpeta.
 Verificado el 2026-11-17: **resuelven bien**, no están colgadas (una versión anterior de este
 documento decía que apuntaban al path viejo `C:\Users\Ilan\Desktop\Bonus`; eso ya no es
 cierto). Esa topología de tres nombres para un solo árbol tiene dos consecuencias que
@@ -697,13 +718,13 @@ por un root que el ingestor nunca recorría quedaba silenciosamente afuera. `scr
 deduplica por realpath, y también lo hacen `ingest/pdfs.py` y `ingest/whatsapp_images_ocr.py`
 después del arreglo del 2026-11-17.
 
-Si alguna vez hay que re-apuntar una junction (borrar el enlace viejo primero, después
+Para crear o re-apuntar una junction (borrar el enlace viejo primero, después
 recrearlo):
 ```powershell
 cmd /c rmdir "C:\Users\Ilan\Desktop\Proyectos\coach-brain\data\raw\videos"
 cmd /c mklink /J "C:\Users\Ilan\Desktop\Proyectos\coach-brain\data\raw\videos" "C:\Users\Ilan\Desktop\Ilan\Seduccion"
 ```
-(idem `pdfs` y `docs`). Usar `cmd /c rmdir` y **nunca** `Remove-Item -Recurse`: en PowerShell 5.1 este último puede entrar en la junction y borrar los 360GB del destino. `find` de MSYS NO atraviesa junctions; pathlib de Python SÍ (que es lo que usan los ingestores), así que un `find` vacío no prueba que la junction esté rota.
+(idem `pdfs` y `docs`). Usar `cmd /c rmdir` y **nunca** `Remove-Item -Recurse`: en PowerShell 5.1 este último puede entrar en la junction y borrar el destino entero. Así se sacaron las tres el 20/11 antes de borrar `Seduccion`, y antes de correr el `-Recurse` sobre el destino se verificó que no hubiera ningún otro reparse point adentro: había 0. `find` de MSYS NO atraviesa junctions; pathlib de Python SÍ (que es lo que usan los ingestores), así que un `find` vacío no prueba que la junction esté rota.
 
 ### 8. Whisper: HF_HUB_DISABLE_SYMLINKS=1
 Seteado a nivel User. Sin esto, la 1ra descarga del modelo falla con `WinError 1314` (symlinks del cache de HF sin Developer Mode).
@@ -1316,7 +1337,7 @@ coach-brain/
 │   ├── escanear_corpus.py    ← pasa ese detector por el corpus vivo; solo lee
 │   ├── reparar_source_path.py    ← reescribe los source_path muertos (gotcha #26)
 │   └── resume, status, watch, transcribe_batches, smoke_test, upload_to_qdrant_cloud
-├── tests/                    ← 1064 tests (+1 salteado) en 37 archivos; `python -m pytest tests/ -q`
+├── tests/                    ← 1072 tests (+1 salteado) en 37 archivos; `python -m pytest tests/ -q`
 ├── logs/                     ← UTF-16 (gotcha #5)
 └── qdrant_storage/           ← 38.343 vectores — IRREMPLAZABLE sin re-correr todo
 ```

@@ -1,9 +1,18 @@
 # INVENTARIO de fuentes
 
-Generado por `scripts/manifest.py`. El detalle fila por fila esta en
-`data/processed/manifest_fuentes.csv`, una fila por archivo.
+> **El material que este inventario describe ya no existe.** Ilan lo borro el
+> 20/11/2026 con autorizacion expresa: 361,41 GB entre
+> `C:\Users\Ilan\Desktop\Ilan\Seduccion` y `data/raw/whatsapp/`. Este archivo y
+> `data/processed/manifest_fuentes.csv` son, desde entonces, el unico registro de
+> que habia. **No vuelvas a correr `scripts/manifest.py` esperando regenerarlo:**
+> recorre `data/raw/`, que quedo vacio, asi que informaria que todo falta y
+> sobreescribiria esta foto final. Ver [BORRAR_MATERIAL.md](BORRAR_MATERIAL.md).
 
-**Total en disco:** 17802 archivos, 361.41 GB
+Generado por `scripts/manifest.py` el 20/11/2026 a las 01:05, antes del borrado.
+El detalle fila por fila esta en `data/processed/manifest_fuentes.csv`, una fila
+por archivo.
+
+**Total en disco al momento de generarlo:** 17802 archivos, 361.41 GB
 
 | Tipo | Archivos | Tamano | Cubiertos | Tamano cubierto |
 |---|---|---|---|---|

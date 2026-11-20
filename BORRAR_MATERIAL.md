@@ -1,7 +1,8 @@
 # Borrar el material crudo: qué se puede y qué no
 
-El material de origen ocupa unos 360 GB en `C:\Users\Ilan\Desktop\Ilan\Seduccion`.
-El conocimiento ya destilado ocupa unos 670 MB y vive en el repo:
+El material de origen ocupaba unos 361 GB en `C:\Users\Ilan\Desktop\Ilan\Seduccion`
+y en `data/raw/whatsapp/`, y **se borró el 20/11/2026** (ver la sección
+de abajo). El conocimiento ya destilado ocupa unos 866 MB y vive en el repo:
 
 | Qué | Dónde | Tamaño |
 |---|---|---|
@@ -15,107 +16,59 @@ de la imagen de Docker. Los transcripts y las extracciones son el insumo para
 reconstruir ese índice.
 
 Las cifras archivo por archivo están en [INVENTARIO.md](INVENTARIO.md) y, con
-una fila por archivo, en `data/processed/manifest_fuentes.csv`. Ese CSV se
-regenera cuando quieras con:
+una fila por archivo, en `data/processed/manifest_fuentes.csv`. Los dos están
+commiteados y son ahora el único registro de qué había, porque el material ya
+no está en disco: `scripts/manifest.py` recorre `data/raw/`, así que correrlo
+hoy informa que todo falta. No lo corras esperando regenerar el inventario.
 
-```bash
-.venv\Scripts\python.exe scripts/manifest.py
-```
+## Ya se borró (20/11/2026, 05:40)
 
-## ¿Se puede borrar hoy? (estado al 20/11, 01:10)
+**El material crudo ya no existe en esta máquina.** Ilan lo borró el 20 de
+noviembre de 2026, después de que las cuatro condiciones de abajo se cumplieran
+y con el `flyctl deploy` ya publicado (versión 19 de la app en Fly, imagen de
+6,8 GB con el índice de 59.101 vectores horneado adentro).
 
-**Sí, por lo que el pipeline puede decir.** Las cuatro condiciones de abajo se
-cumplen: no queda ningún hueco, los 8839 transcripts tienen extracción, el
-índice está reconstruido y verificado en 59.101 vectores, y el inventario
-regenerado lo confirma. Lo único pendiente es publicar el índice nuevo en la
-app de Fly con `flyctl deploy`, y eso no necesita el material crudo: el índice
-ya está construido en disco.
+Lo que se borró, medido justo antes:
 
-**Pero borrar no es la única opción, y no es la que recomiendo.** El material
-está subido a un Drive que es de otra persona. Ese acceso te lo pueden quitar o
-el dueño puede borrar la carpeta, sin avisar, y entonces los 360 GB no existen
-en ningún lado. Mover el material a un disco externo cuesta lo que cuesta un
-disco y deja la copia en tus manos. Si lo borrás, lo que queda es el texto
-destilado: 670 MB que son todo lo que la app necesita, pero no te devuelven un
-video si algún día querés volver a verlo o re-transcribirlo mejor.
+| Qué | Dónde | Archivos | Tamaño |
+|---|---|---|---|
+| Videos, clases y libros | `C:\Users\Ilan\Desktop\Ilan\Seduccion` | 263 | 358,33 GB |
+| Capturas y clips de WhatsApp | `data/raw/whatsapp/` | 17.543 | 3,08 GB |
+| **Total** | | **17.806** | **361,41 GB** |
 
-El hueco se cerró el 18/11: `untrunc` recuperó la clase truncada y ya está
-transcripta — 1592 segmentos, 39.500 caracteres, 50min 17s, castellano con
-probabilidad 1,0. El corpus pasó de 8838 a **8839 transcripts**.
+Las tres junctions de `data/raw/` (`docs`, `pdfs`, `videos`) apuntaban todas al
+mismo destino, `Seduccion`, y se quitaron con `cmd /c rmdir` antes de borrar el
+destino. Eso importa: `Remove-Item -Recurse` sobre una junction en PowerShell
+5.1 puede entrar en ella y destruir el destino, así que una junction se saca
+siempre con `rmdir` de `cmd`, que borra el enlace y nunca lo sigue. Antes de
+correr el `-Recurse` sobre `Seduccion` se verificó que no hubiera ningún otro
+reparse point adentro: había 0. Lo mismo para `data/raw/whatsapp/`, que era una
+carpeta real y no un enlace, con 0 reparse points adentro y 0 archivos
+trackeados por git (`.gitignore:23: data/raw/**`).
 
-De las 17.802 fuentes, las 5 que siguen en `NO` no son contenido perdido:
+Después del borrado quedaron 389,6 GB libres en `C:`. En `data/raw/` sobreviven
+`audios/`, `screenshots/` y `_drive_dump/`, las tres vacías, más el `.gitkeep`.
 
-| Fuente | Por qué no se cubre |
-|---|---|
-| `4 Hablarle a una chica del trabajo, sexualiza.mp4` | contenedor ilegible (sin átomo `moov`), pero su contenido está transcripto desde la copia `... REPARADO.mp4` |
-| `00031653-VIDEO-2025-09-08-11-54-41.mp4` | sin pista de audio: no hay habla que transcribir |
-| `00033588-GIF-2025-10-03-00-26-43.mp4` | ídem |
-| `00021049-CV_divertido_Ilan_Daniele.pdf` | excluido a propósito: es tu CV, no material del coach |
-| `00021052-CV_divertido_Ilan_Daniele_coqueto.pdf` | ídem |
+**Qué queda y qué no.** Queda el conocimiento destilado, 866 MB que ya estaban
+en el repo y en GitHub antes de borrar: 8839 transcripts, 8839 extracciones, el
+OCR de las capturas y el índice de 59.101 vectores. Con eso la app funciona
+igual. No queda ninguna copia bajo control de Ilan de los 361,41 GB originales:
+hay una en un Drive que es de otra persona — de ahí salió el material — y nunca
+se pudo verificar que esté completo, porque `gdown` devolvió 401, que no prueba
+ni que esté ni que falte. Lo que se perdió para siempre es la posibilidad de
+volver a transcribir con un modelo mejor y la de volver a ver un video.
 
-Lo que falta no necesita el material crudo:
+De los 17.806 archivos, 2 clips de WhatsApp no tenían pista de audio y nunca
+se pudieron transcribir, así que de esos dos no queda ni contenido ni registro
+de contenido. Los otros 17.804 están cubiertos: ver [INVENTARIO.md](INVENTARIO.md),
+que es ahora el único registro de qué había. **`scripts/manifest.py` ya no puede
+regenerarlo**, porque recorre `data/raw/` y ahí no queda nada; si lo corrés hoy
+va a informar que todo falta. El `INVENTARIO.md` y el
+`data/processed/manifest_fuentes.csv` que están commiteados son la foto final.
 
-| Condición | Estado |
-|---|---|
-| Que no quede ningún `HUECO` | **Hecho**, 18/11 13:06 |
-| Que la re-destilación con Ollama termine | **Hecha**, 19/11 21:42: `ok=291 skip=8548 errores=0`, los 8839 transcripts tienen extracción. Tardó 1 día 6:13:51 |
-| Que el índice se reconstruya y la app lo sirva | **Hecho local**, 20/11 00:46: 59.101 vectores (15.457 + 18.553 + 25.091), verificados reabriendo el cliente y contando, no leyendo el log. Una búsqueda de prueba devuelve principios, situaciones y frases. **Falta el `flyctl deploy`**, que publica el índice nuevo en la app de Fly y espera el OK de Ilan |
-| Que el inventario se regenere y confirme lo anterior | **Hecho**, 20/11 01:05: 17.802 archivos en disco, 5 sin cubrir, **0 huecos reales** |
-
-La extracción corre sobre `transcripts/`, el índice sobre `extracted/`, y el
-inventario solo lee tamaños y duraciones. Ninguno abre un video.
-
-El primer `--reset`, el del 20/11 a las 00:11, **no sirvió**: dejó el índice
-duplicado, con 98.742 vectores en vez de 59.101, porque en Windows el borrado
-de las colecciones falla en silencio (gotcha 36 de STATUS.md). El log informaba
-los conteos correctos igual. Está anotado acá porque la condición de arriba se
-cumple con el **segundo** reset, el de las 00:46, y porque el conteo que se
-puede creer es el que sale de reabrir el cliente, no el que imprime el proceso
-que escribió.
-
-El inventario tampoco pasó en el primer intento: marcaba `HUECO` sobre
-`4 Hablarle a una chica del trabajo, sexualiza.mp4`, el contenedor sin átomo
-`moov`. No era una pérdida — su contenido está transcripto (50,3 min, 39.500
-caracteres) desde la copia que recuperó `untrunc` — pero el transcript declaraba
-como fuente el archivo ilegible en vez de la copia reparada, así que el
-inventario veía la copia como material sin procesar. Se corrigió el
-`source_path` del transcript y se le enseñó a `clasificar_sin_cubrir()` a
-distinguir "roto" de "roto pero recuperado": un original ilegible cuyo nombre
-es prefijo de un hermano cubierto ya no cuenta como hueco. El original de
-977.018.880 bytes queda en la lista de sin cubrir con ese motivo, y **borrarlo
-no pierde nada que no esté en la copia reparada**.
-
-### Lo único que hay que hacer antes de borrar
-
-**Hecho el 19/11.** El archivo recuperado vivía solo en el scratchpad de la
-sesión de Claude, que se limpia solo, así que se copió al lado del original:
-
-```
-C:\Users\Ilan\Desktop\Ilan\Seduccion\Bonus\4 Hablarle a una chica del trabajo, sexualiza REPARADO.mp4
-```
-
-969.451.760 bytes, verificado con `cmp` contra el origen: idéntico byte a byte.
-El original roto (`4 Hablarle a una chica del trabajo, sexualiza.mp4`) sigue
-donde estaba, y los dos son parte de los 360 GB. Si se borra el material crudo
-se van los dos juntos, y entonces la clase no se puede volver a ver: no queda ni
-el arreglado ni el roto del que salió. El transcript sí queda (1592 segmentos,
-39.500 caracteres), que es lo que usa la app.
-
-### Y las dos pérdidas que ningún paso puede devolver
-
-1. **Re-transcribir con un modelo mejor.** Hoy el corpus es `large-v3`. Si sale
-   algo mejor y el material no está, los transcripts actuales son el techo.
-2. **Todo lo visual.** El corpus es solo texto: el lenguaje corporal, los gestos
-   y lo que se ve en pantalla en una demostración no quedaron indexados, y no se
-   derivan del transcript.
-
-Las dos valen para los 358 GB enteros, no para un archivo. Por eso la
-recomendación sigue siendo **mover el material a un disco externo en vez de
-borrarlo**: un disco de 1 TB conserva las dos opciones, y el conocimiento
-destilado que sirve la app son 670 MB que ya están en el repo.
-
-**Borrar no está autorizado.** Esta sección dice que ya no hay un impedimento
-técnico, no que haya que hacerlo.
+Todo lo que sigue abajo es el análisis previo a la decisión. Se conserva porque
+documenta cómo se verificó que el material era descartable, no porque haya algo
+pendiente.
 
 ## Antes de borrar nada
 
